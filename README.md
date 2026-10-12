@@ -598,8 +598,18 @@ VITE_API_URL=http://localhost:8000 npm run dev -- --port 3000
 ```bash
 cp .env.example .env
 docker compose up --build        # postgres, redis, backend, frontend
-docker compose --profile lab up --build   # + keycloak, guacamole, vault (not yet integrated)
+docker compose --profile lab up --build   # + keycloak, guacamole, openbao
 ```
+
+The `lab` profile starts OpenBao (`openbao/openbao:2.7.1`) as an in-memory
+dev server on port 8200. `openbao-init` enables KV v2 at `secret/`, writes
+the `securepam-runtime` policy, stores one synthetic secret at
+`secret/targets/lab-sample`, and writes a non-root token to the
+`openbao_runtime` volume (`/openbao/runtime/app-token`). The application
+does not read that token yet. `OPENBAO_DEV_ROOT_TOKEN_ID` is only for
+Compose bootstrap. Do not put it in `VAULT_TOKEN`. The service is also
+reachable inside the compose network as `vault`, which matches
+`VAULT_URL`. This dev server is not a production configuration.
 
 ## Migrations
 
@@ -730,7 +740,7 @@ Phase 5 adds OpenBao KV v2 credential references and `CredentialService`
 (authorized, audited, backend-only retrieval for future gateways) — see
 [Credential management (OpenBao)](#credential-management-openbao).
 
-Not implemented: Keycloak/OIDC, OpenBao rotation/dynamic secrets, Guacamole (RDP), SSH
+Not implemented: OpenBao rotation/dynamic secrets, the real Guacamole (RDP) handoff, SSH
 gateway, web reverse proxy, isolated browser, session recording,
 Wazuh/SIEM, Users/Roles CRUD, a JIT REST endpoint (deliberately — see
 the JIT lifecycle section above), and a background sweep for
