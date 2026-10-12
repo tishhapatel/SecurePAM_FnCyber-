@@ -80,11 +80,18 @@ services:
     volumes:
       - ./backend:/app
       - recording_data:/data/recordings
+      # Lab: least-privilege token written by openbao-init. Use with
+      # SECRET_PROVIDER=openbao, OPENBAO_ADDR=http://openbao:8200,
+      # OPENBAO_TOKEN_FILE=/openbao/runtime/app-token.
+      - openbao_runtime:/openbao/runtime:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      openbao-init:
+        condition: service_completed_successfully
+        required: false  # only present with --profile lab
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -182,7 +189,8 @@ services:
     cap_add:
       - IPC_LOCK
     ports:
-      - "8200:8200"
+      # Loopback only: the dev server's root token is a known lab default.
+      - "127.0.0.1:8200:8200"
     healthcheck:
       test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
       interval: 5s

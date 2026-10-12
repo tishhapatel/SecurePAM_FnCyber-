@@ -406,6 +406,7 @@ relative to `backend/`, regardless of the working directory):
 | `OPENBAO_ADDR` | — | `http(s)://host:port`, no path/credentials |
 | `OPENBAO_MOUNT_POINT` | `secret` | KV v2 mount |
 | `OPENBAO_TOKEN` | — | The **restricted** app token (below). Held as a `SecretStr`; never logged, echoed in errors, or sent to the health endpoint |
+| `OPENBAO_TOKEN_FILE` | — | Alternative to `OPENBAO_TOKEN`: a file holding the token, read once at startup (missing/unreadable/empty fails startup; setting both is refused) |
 | `OPENBAO_SECRET_PATH_PREFIX` | `securepam` | Every reference must sit under `<mount>/data/<prefix>/…` |
 | `OPENBAO_CONNECT_TIMEOUT_SECONDS` / `OPENBAO_REQUEST_TIMEOUT_SECONDS` | `3` / `5` | Separate connect/request timeouts |
 | `OPENBAO_CA_CERT` | empty | CA bundle path for TLS with a private CA |
@@ -602,14 +603,24 @@ docker compose --profile lab up --build   # + keycloak, guacamole, openbao
 ```
 
 The `lab` profile starts OpenBao (`openbao/openbao:2.7.1`) as an in-memory
-dev server on port 8200. `openbao-init` enables KV v2 at `secret/`, writes
-the `securepam-runtime` policy, stores one synthetic secret at
-`secret/targets/lab-sample`, and writes a non-root token to the
-`openbao_runtime` volume (`/openbao/runtime/app-token`). The application
-does not read that token yet. `OPENBAO_DEV_ROOT_TOKEN_ID` is only for
-Compose bootstrap. Do not put it in `VAULT_TOKEN`. The service is also
-reachable inside the compose network as `vault`, which matches
-`VAULT_URL`. This dev server is not a production configuration.
+dev server on `127.0.0.1:8200` (loopback only — its root token is a known lab
+default). `openbao-init` enables KV v2 at `secret/`, writes the
+`securepam-runtime` policy (read-only on `secret/data/securepam/assets/*`,
+nothing else), stores one synthetic credential at
+`secret/securepam/assets/lab-sample`, and writes a non-root, no-default-policy
+token to the `openbao_runtime` volume. The backend mounts that volume
+read-only; to use it, set in `.env`:
+
+```bash
+SECRET_PROVIDER=openbao
+OPENBAO_ADDR=http://openbao:8200
+OPENBAO_TOKEN_FILE=/openbao/runtime/app-token
+```
+
+`OPENBAO_DEV_ROOT_TOKEN_ID` is only for the compose bootstrap — never put it
+in `OPENBAO_TOKEN`. The backend waits for `openbao-init` when the lab profile
+is active (`depends_on … required: false` needs Docker Compose v2.20.2+). The
+dev server keeps nothing across restarts and is not a production configuration.
 
 ## Migrations
 

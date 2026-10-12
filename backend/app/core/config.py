@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     OPENBAO_ADDR: str = ""
     OPENBAO_MOUNT_POINT: str = "secret"
     OPENBAO_TOKEN: SecretStr = SecretStr("")
+    # Alternative to OPENBAO_TOKEN: a file holding the token (e.g. the lab
+    # bootstrap's /openbao/runtime/app-token). Read once at startup.
+    OPENBAO_TOKEN_FILE: str = ""
     # Every credential reference must live under <mount>/data/<prefix>/...
     OPENBAO_SECRET_PATH_PREFIX: str = "securepam"
     OPENBAO_CONNECT_TIMEOUT_SECONDS: float = 3.0
@@ -166,6 +169,18 @@ class Settings(BaseSettings):
             if production:
                 errors.append("SECRET_PROVIDER=mock is not allowed when ENVIRONMENT=production")
         else:
+            if self.OPENBAO_TOKEN_FILE:
+                if self.OPENBAO_TOKEN.get_secret_value():
+                    errors.append("Set only one of OPENBAO_TOKEN and OPENBAO_TOKEN_FILE")
+                else:
+                    try:
+                        file_token = Path(self.OPENBAO_TOKEN_FILE).read_text(encoding="utf-8").strip()
+                    except (OSError, UnicodeDecodeError):
+                        errors.append("OPENBAO_TOKEN_FILE could not be read")
+                    else:
+                        self.OPENBAO_TOKEN = SecretStr(file_token)
+                        del file_token
+
             token = self.OPENBAO_TOKEN.get_secret_value()
             if not token.strip():
                 errors.append("OPENBAO_TOKEN is required when SECRET_PROVIDER=openbao")

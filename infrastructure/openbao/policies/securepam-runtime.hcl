@@ -1,22 +1,14 @@
-# Least-privilege policy for the SecurePAM application identity.
-# Lab/dev only. This policy can read target and application secrets.
-# It cannot write secrets, list the whole mount, or use sys/admin paths.
+# Least-privilege policy for the SecurePAM application identity (lab/dev).
 #
-# KV v2 stores data at secret/data/... and metadata at secret/metadata/...
-# The CLI path secret/targets/<name> maps to secret/data/targets/<name>.
+# The backend reads exactly one kind of path: an asset credential at
+#   <mount>/data/<OPENBAO_SECRET_PATH_PREFIX>/assets/<name>
+# (see backend/app/secret_providers/paths.py). Read only — no write, no
+# delete, no metadata/list (so the token cannot enumerate secrets), and
+# no sys/ or auth/ paths.
+#
+# KV v2 stores data at secret/data/...; the CLI path
+# secret/securepam/assets/<name> maps to secret/data/securepam/assets/<name>.
 
-path "secret/data/targets/*" {
+path "secret/data/securepam/assets/*" {
   capabilities = ["read"]
-}
-
-path "secret/data/applications/*" {
-  capabilities = ["read"]
-}
-
-path "secret/metadata/targets/*" {
-  capabilities = ["read", "list"]
-}
-
-path "secret/metadata/applications/*" {
-  capabilities = ["read", "list"]
 }

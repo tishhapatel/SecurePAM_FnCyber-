@@ -7,6 +7,10 @@ set -eu
 
 BAO_ADDR="${BAO_ADDR:-http://openbao:8200}"
 export BAO_ADDR
+POLICY_DIR="${POLICY_DIR:-/openbao/policies}"
+RUNTIME_DIR="${RUNTIME_DIR:-/openbao/runtime}"
+# Must match the backend's OPENBAO_SECRET_PATH_PREFIX.
+SECRET_PREFIX="${SECRET_PREFIX:-securepam}"
 
 if [ -z "${BAO_TOKEN:-}" ]; then
   echo "BAO_TOKEN is empty. Set OPENBAO_DEV_ROOT_TOKEN_ID for the lab bootstrap." >&2
@@ -30,15 +34,17 @@ else
   bao secrets enable -path=secret kv-v2
 fi
 
-bao policy write securepam-runtime /openbao/policies/securepam-runtime.hcl
+bao policy write securepam-runtime "${POLICY_DIR}/securepam-runtime.hcl"
 
-# Synthetic path so the convention exists. This is not a real credential.
-bao kv put secret/targets/lab-sample \
+# Synthetic credential at the path convention the backend reads
+# (<prefix>/assets/<name>). This is not a real credential.
+bao kv put "secret/${SECRET_PREFIX}/assets/lab-sample" \
   username="lab-operator" \
   password="lab-only-not-a-real-credential" \
   >/dev/null
 
 umask 077
+tmp="${RUNTIME_DIR}/app-token.tmp"
 bao token create \
   -policy=securepam-runtime \
   -no-default-policy \
@@ -46,6 +52,11 @@ bao token create \
   -ttl=768h \
   -display-name=securepam-lab \
   -field=token \
-  > /openbao/runtime/app-token
+  > "$tmp"
+# The backend container runs as a non-root user with a different UID, so the
+# file must be readable by it. The volume is mounted only into openbao-init
+# (rw) and backend (ro). Lab only — production uses a real auth method.
+chmod 0444 "$tmp"
+mv "$tmp" "${RUNTIME_DIR}/app-token"
 
 echo "OpenBao lab configuration applied. Runtime token stored in the openbao_runtime volume."
