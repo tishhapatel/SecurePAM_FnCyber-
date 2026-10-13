@@ -28,6 +28,8 @@ _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$")
 _DEV_MODE_ENVIRONMENTS = {"development", "test"}
 _PLACEHOLDER_SECRET_KEY = "change-this-to-a-secure-random-string-in-production"
 _MIN_SECRET_KEY_LENGTH = 32
+_PLACEHOLDER_GATEWAY_TOKEN = "dev-insecure-change-me-in-production"
+_MIN_GATEWAY_TOKEN_LENGTH = 32
 
 
 class SettingsError(Exception):
@@ -152,6 +154,33 @@ class Settings(BaseSettings):
     RISK_HIGH_THRESHOLD: int = 60
     RISK_CRITICAL_THRESHOLD: int = 80
 
+    # --- Gateway Auth Hook ---
+    # Pre-shared secret sent by NGINX in X-Gateway-Auth-Token on every
+    # auth_request sub-request.  The /gateway/internal/auth endpoint
+    # validates this header so the endpoint is not publicly exploitable.
+    # Must be set in .env (min 32 chars); never hard-coded. There is no
+    # default: while it is unset or weak the endpoint rejects every call.
+    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    GATEWAY_AUTH_TOKEN: SecretStr = SecretStr("")
+    # Secure flag on the gateway credential cookie. Browsers accept Secure
+    # cookies on http://localhost, so only disable this for other plain-HTTP
+    # lab hosts; it cannot be disabled in production.
+    GATEWAY_COOKIE_SECURE: bool = True
+
+    # --- Gateway Config Manager ---
+    # Directory where NGINX upstream config snippets are written.
+    # Mounted as shared Docker volume 'gateway_config' in both backend (/gateway-config/)
+    # and NGINX (/etc/nginx/conf.d/apps/).  Leave empty to skip config file writing
+    # (e.g. in local dev without Docker).
+    GATEWAY_CONFIG_DIR: str = "/gateway-config"
+    # URL of the NGINX internal control server for triggering reloads.
+    # Example: http://securepam-nginx-gateway:8081
+    # Leave empty to skip reload calls (local dev without NGINX container).
+    GATEWAY_NGINX_CONTROL_URL: str = ""
+    # Browser Isolation service URL
+    GATEWAY_BROWSER_ISOLATION_URL: str = "http://browser-isolation:6080"
+    BROWSER_ISOLATION_ENABLED: bool = True
+
     # --- Security ---
     TOKEN_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
@@ -213,6 +242,19 @@ class Settings(BaseSettings):
                 "SECRET_KEY must be changed, non-empty, and sufficiently long in production; "
                 "it must be non-empty and non-placeholder in staging"
             )
+        # An unset GATEWAY_AUTH_TOKEN is allowed (the gateway is optional and the
+        # auth hook then rejects everything); a set one must not be the old
+        # placeholder or short in production.
+        gateway_token = self.GATEWAY_AUTH_TOKEN.get_secret_value()
+        if production and gateway_token and (
+            gateway_token == _PLACEHOLDER_GATEWAY_TOKEN
+            or len(gateway_token) < _MIN_GATEWAY_TOKEN_LENGTH
+        ):
+            errors.append(
+                f"GATEWAY_AUTH_TOKEN must be changed from default and at least {_MIN_GATEWAY_TOKEN_LENGTH} characters when ENVIRONMENT=production"
+            )
+        if production and not self.GATEWAY_COOKIE_SECURE:
+            errors.append("GATEWAY_COOKIE_SECURE=false is not allowed when ENVIRONMENT=production")
 
         if self.SECRET_PROVIDER == "mock":
             if production:

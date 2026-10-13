@@ -16,6 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.gateway import (
+    remove_app_upstream_config,
+    trigger_nginx_reload,
+    write_app_upstream_config,
+)
 from app.core.audit import client_ip, write_audit_log
 from app.core.deps import PermissionChecker, get_db
 from app.core.pagination import apply_sorting, paginate
@@ -114,6 +119,12 @@ async def create_application(
     )
     await db.commit()
     await db.refresh(application)
+
+    # Gateway upstream configuration synchronization
+    if application.enabled and application.status == "ACTIVE" and application.access_mode == "STANDARD_PROXY":
+        await write_app_upstream_config(application)
+        await trigger_nginx_reload()
+
     return application
 
 
@@ -164,6 +175,22 @@ async def update_application(
     )
     await db.commit()
     await db.refresh(application)
+
+    # Gateway upstream configuration synchronization
+    target_affecting = {"hostname", "port", "protocol", "enabled", "status", "access_mode", "is_deleted"}
+    if target_affecting & changes.keys():
+        if (
+            application.enabled
+            and application.status == "ACTIVE"
+            and not application.is_deleted
+            and application.access_mode == "STANDARD_PROXY"
+        ):
+            await write_app_upstream_config(application)
+            await trigger_nginx_reload()
+        else:
+            await remove_app_upstream_config(application.id)
+            await trigger_nginx_reload()
+
     return application
 
 
@@ -203,3 +230,7 @@ async def delete_application(
         metadata={"name": application.name},
     )
     await db.commit()
+
+    # Gateway upstream configuration synchronization
+    await remove_app_upstream_config(application.id)
+    await trigger_nginx_reload()

@@ -1,5 +1,3 @@
-version: "3.9"
-
 # =============================================================================
 # SecurePAM Docker Compose
 # =============================================================================
@@ -82,6 +80,8 @@ services:
       - ./backend:/app
       - recording_data:/data/recordings
       - openbao_runtime:/run/openbao:ro
+      # Shared volume for NGINX upstream config files (Member 11)
+      - gateway_config:/gateway-config
     command:
       - sh
       - -c
@@ -123,6 +123,73 @@ services:
       - backend
     networks:
       - securepam-net
+
+  # ---------------------------------------------------------------------------
+  # Gateway Profile — Member 11: Web Gateway & Browser Isolation
+  # Start with: docker compose --profile gateway up --build
+  # This does NOT start with plain: docker compose up
+  # ---------------------------------------------------------------------------
+
+  nginx-gateway:
+    build:
+      context: ./gateway/nginx
+      dockerfile: Dockerfile
+    container_name: securepam-nginx-gateway
+    profiles: ["gateway"]
+    environment:
+      # Never hardcode upstream hostnames or ports as secrets.
+      # These are internal Docker service names — not sensitive.
+      GATEWAY_BACKEND_HOST: ${GATEWAY_BACKEND_HOST:-backend}
+      GATEWAY_BACKEND_PORT: ${GATEWAY_BACKEND_PORT:-8000}
+      GATEWAY_TEST_UPSTREAM: ${GATEWAY_TEST_UPSTREAM:-backend:8000}
+      # Auth token for NGINX→backend auth_request validation.
+      # Must match GATEWAY_AUTH_TOKEN in the backend .env.
+      GATEWAY_AUTH_TOKEN: ${GATEWAY_AUTH_TOKEN:-}  # no default; the container refuses to start without one
+      # Internal control port — reachable from backend on Docker net, NOT from host
+      GATEWAY_NGINX_CONTROL_PORT: ${GATEWAY_NGINX_CONTROL_PORT:-8081}
+      # Browser isolation service
+      GATEWAY_BROWSER_ISOLATION_HOST: ${GATEWAY_BROWSER_ISOLATION_HOST:-browser-isolation}
+      GATEWAY_BROWSER_ISOLATION_PORT: ${GATEWAY_BROWSER_ISOLATION_PORT:-6080}
+    ports:
+      - "${GATEWAY_PORT:-7000}:7000"
+      # Control port exposed to Docker network only (not bound to host 0.0.0.0)
+      # Backend calls this on securepam-net to trigger nginx -s reload
+      - "127.0.0.1:${GATEWAY_CONTROL_HOST_PORT:-18081}:8081"
+    volumes:
+      # Shared upstream config directory — backend writes here, NGINX reads at reload
+      - gateway_config:/etc/nginx/conf.d/apps
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - securepam-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:7000/gw/test-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  browser-isolation:
+    build:
+      context: ./gateway/browser-isolation
+      dockerfile: Dockerfile
+    container_name: securepam-browser-isolation
+    profiles: ["gateway"]
+    environment:
+      PORT: 6080
+      BROWSER_ISOLATION_TOKEN: ${GATEWAY_AUTH_TOKEN:-}  # no default; the service refuses to start without one
+    ports:
+      - "127.0.0.1:${BROWSER_ISOLATION_HOST_PORT:-16080}:6080"
+    networks:
+      - securepam-net
+    volumes:
+      - recording_data:/data/recordings
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 
   # ---------------------------------------------------------------------------
   # Lab Profile — Real infrastructure services
@@ -266,6 +333,8 @@ volumes:
   grafana_data:
   openbao_runtime:
   keycloak_postgres_data:
+  # Shared NGINX upstream config volume — backend writes, NGINX reads
+  gateway_config:
 
 networks:
   securepam-net:

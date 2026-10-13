@@ -42,3 +42,8 @@ def validate_secret_name(name: str) -> str:
 def asset_secret_path(prefix: str, secret_name: str) -> str:
     """Server-controlled convention: <prefix>/assets/<secret_name>."""
     return validate_secret_path(f"{prefix}/assets/{validate_secret_name(secret_name)}", prefix)
+
+
+def application_secret_path(prefix: str, secret_name: str) -> str:
+    """Server-controlled convention: <prefix>/applications/<secret_name>."""
+    return validate_secret_path(f"{prefix}/applications/{validate_secret_name(secret_name)}", prefix)
