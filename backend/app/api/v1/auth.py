@@ -118,7 +118,11 @@ async def dev_login(
         )
 
     # Get user roles
-    roles = [ur.role.name for ur in user.roles if ur.role]
+    roles = [
+        ur.role.name
+        for ur in user.roles
+        if ur.role and ur.role.is_active
+    ]
 
     # Create tokens
     access_token = create_dev_access_token(
@@ -156,11 +160,15 @@ async def get_current_user_info(
     current_user: User = Depends(get_current_active_user),
 ):
     """Return the current authenticated user's info and permissions."""
-    roles = [ur.role.name for ur in current_user.roles if ur.role]
+    roles = [
+        ur.role.name
+        for ur in current_user.roles
+        if ur.role and ur.role.is_active
+    ]
 
     permissions = set()
     for ur in current_user.roles:
-        if ur.role:
+        if ur.role and ur.role.is_active:
             for perm in ur.role.permissions:
                 permissions.add(f"{perm.resource}:{perm.action}")
 

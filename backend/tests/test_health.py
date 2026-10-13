@@ -48,3 +48,22 @@ async def test_detailed_health_reports_all_dev_mode_services_healthy(client: Asy
     assert services["vault"] == "healthy"
     assert services["gateway"] == "healthy"
     assert services["siem"] == "healthy"
+
+async def test_health_preserves_caller_supplied_request_id(client: AsyncClient):
+    request_id = "securepam-test-request-123"
+
+    resp = await client.get(
+        "/health",
+        headers={"X-Request-ID": request_id},
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["x-request-id"] == request_id
+
+
+async def test_health_generates_request_id_when_missing(client: AsyncClient):
+    resp = await client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.headers["x-request-id"]
+    assert len(resp.headers["x-request-id"]) == 36

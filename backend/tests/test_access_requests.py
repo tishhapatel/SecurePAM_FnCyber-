@@ -336,3 +336,28 @@ async def test_high_risk_forces_approval_even_with_auto_approve_policy(db_sessio
     )
     assert request.risk_level in ("HIGH", "CRITICAL")
     assert request.status == "APPROVAL_REQUIRED"
+
+
+async def test_inactive_admin_role_cannot_view_all_requests(
+    client: AsyncClient,
+    admin_token: str,
+    db_session: AsyncSession,
+):
+    from app.models.role import Role
+
+    role = await _get(db_session, Role, name="ADMIN")
+    original_active = role.is_active
+
+    try:
+        role.is_active = False
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/v1/access-requests",
+            headers=auth_header(admin_token),
+        )
+
+        assert resp.status_code == 403
+    finally:
+        role.is_active = original_active
+        await db_session.commit()

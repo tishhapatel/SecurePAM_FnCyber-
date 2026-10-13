@@ -98,6 +98,92 @@ async def test_unauthenticated_audit_read_returns_no_data(client, db_session):
     assert r.status_code == 401 and "event_id" not in r.text
 
 
+async def test_audit_pagination_and_sorting(
+    client, db_session, auditor_token
+):
+    now = datetime.now(timezone.utc)
+    db_session.add_all([
+        AuditLog(
+            event_id="EVT-PAGE-001",
+            timestamp=now - timedelta(minutes=3),
+            actor_username="operator",
+            action="LOGIN_SUCCESS",
+            result="SUCCESS",
+            severity="INFO",
+        ),
+        AuditLog(
+            event_id="EVT-PAGE-002",
+            timestamp=now - timedelta(minutes=2),
+            actor_username="operator",
+            action="ACCESS_DENIED",
+            result="DENIED",
+            severity="HIGH",
+        ),
+        AuditLog(
+            event_id="EVT-PAGE-003",
+            timestamp=now - timedelta(minutes=1),
+            actor_username="admin",
+            action="LOGIN_SUCCESS",
+            result="SUCCESS",
+            severity="INFO",
+        ),
+    ])
+    await db_session.commit()
+
+    r = await client.get(
+        "/api/v1/audit/?page=1&page_size=2&sort_by=timestamp&sort_order=asc",
+        headers=auth_header(auditor_token),
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 3
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert body["pages"] == 2
+    assert len(body["items"]) == 2
+    assert body["items"][0]["event_id"] == "EVT-PAGE-001"
+    assert body["items"][1]["event_id"] == "EVT-PAGE-002"
+
+
+async def test_audit_action_and_severity_filters(
+    client, db_session, auditor_token
+):
+    now = datetime.now(timezone.utc)
+    db_session.add_all([
+        AuditLog(
+            event_id="EVT-FILTER-001",
+            timestamp=now - timedelta(minutes=2),
+            actor_username="operator",
+            action="LOGIN_SUCCESS",
+            result="SUCCESS",
+            severity="INFO",
+        ),
+        AuditLog(
+            event_id="EVT-FILTER-002",
+            timestamp=now - timedelta(minutes=1),
+            actor_username="operator",
+            action="ACCESS_DENIED",
+            result="DENIED",
+            severity="HIGH",
+        ),
+    ])
+    await db_session.commit()
+
+    r = await client.get(
+        "/api/v1/audit/?action=access_denied&severity=high",
+        headers=auth_header(auditor_token),
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert body["items"][0]["event_id"] == "EVT-FILTER-002"
+    assert body["items"][0]["action"] == "ACCESS_DENIED"
+    assert body["items"][0]["severity"] == "HIGH"
+
+
 # --- role-based access ------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -137,22 +223,82 @@ async def test_approver_cannot_launch_or_terminate(client, db_session, approver_
 
 # --- object-level authorization (IDOR) --------------------------------------
 
-async def test_own_scope_lists_only_own_sessions(client, db_session, operator_token, operator2_token):
+
+async def test_own_scope_lists_only_own_sessions(
+    client, db_session, operator_token, operator2_token
+):
     mine = await _make_session(db_session, "operator")
     theirs = await _make_session(db_session, "operator2")
 
-    r = await client.get("/api/v1/sessions/", headers=auth_header(operator_token))
-    assert [s["id"] for s in r.json()] == [str(mine.id)]
+    r = await client.get(
+        "/api/v1/sessions/",
+        headers=auth_header(operator_token),
+    )
+    assert r.status_code == 200
+    assert [s["id"] for s in r.json()["items"]] == [str(mine.id)]
 
-    r = await client.get("/api/v1/sessions/", headers=auth_header(operator2_token))
-    assert [s["id"] for s in r.json()] == [str(theirs.id)]
+    r = await client.get(
+        "/api/v1/sessions/",
+        headers=auth_header(operator2_token),
+    )
+    assert r.status_code == 200
+    assert [s["id"] for s in r.json()["items"]] == [str(theirs.id)]
 
 
-async def test_view_all_scope_lists_everyone(client, db_session, auditor_token, operator2_token):
+async def test_view_all_scope_lists_everyone(
+    client, db_session, auditor_token, operator2_token
+):
     await _make_session(db_session, "operator")
     await _make_session(db_session, "operator2")
-    r = await client.get("/api/v1/sessions/", headers=auth_header(auditor_token))
-    assert len(r.json()) == 2
+
+    r = await client.get(
+        "/api/v1/sessions/",
+        headers=auth_header(auditor_token),
+    )
+    assert r.status_code == 200
+    assert len(r.json()["items"]) == 2
+    assert r.json()["total"] == 2
+
+
+async def test_sessions_pagination_returns_page_metadata(
+    client, db_session, auditor_token
+):
+    await _make_session(db_session, status="ACTIVE")
+    await _make_session(db_session, status="COMPLETED")
+    await _make_session(db_session, status="FAILED")
+
+    r = await client.get(
+        "/api/v1/sessions/?page=1&page_size=2",
+        headers=auth_header(auditor_token),
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["items"]) == 2
+    assert body["total"] == 3
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert body["pages"] == 2
+
+
+async def test_sessions_sorting_and_status_filter(
+    client, db_session, auditor_token
+):
+    await _make_session(db_session, status="ACTIVE")
+    await _make_session(db_session, status="COMPLETED")
+    await _make_session(db_session, status="ACTIVE")
+
+    r = await client.get(
+        "/api/v1/sessions/?status=ACTIVE&sort_by=session_number&sort_order=asc",
+        headers=auth_header(auditor_token),
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 2
+    assert all(item["status"] == "ACTIVE" for item in body["items"])
+    session_numbers = [item["session_number"] for item in body["items"]]
+    assert session_numbers == sorted(session_numbers)
 
 
 async def test_peer_session_detail_is_404(client, db_session, operator2_token):
@@ -356,6 +502,56 @@ async def test_launch_provider_unavailable_fails_closed(client, db_session, oper
     assert s.status == "FAILED"
     assert await _actions(db_session, "SESSION_STARTED") == []
 
+
+async def test_recordings_pagination_returns_page_metadata(
+    client, db_session, auditor_token
+):
+    await _make_session(db_session, with_recording=True)
+    await _make_session(db_session, with_recording=True)
+    await _make_session(db_session, with_recording=True)
+
+    r = await client.get(
+        "/api/v1/recordings/?page=1&page_size=2",
+        headers=auth_header(auditor_token),
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["items"]) == 2
+    assert body["total"] == 3
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert body["pages"] == 2
+
+
+async def test_recordings_sort_by_type(
+    client, db_session, auditor_token
+):
+    session = await _make_session(db_session)
+    db_session.add_all([
+        Recording(
+            session_id=session.id,
+            recording_type="VIDEO",
+            status="COMPLETED",
+        ),
+        Recording(
+            session_id=session.id,
+            recording_type="TERMINAL",
+            status="COMPLETED",
+        ),
+    ])
+    await db_session.commit()
+
+    r = await client.get(
+        "/api/v1/recordings/?sort_by=recording_type&sort_order=asc",
+        headers=auth_header(auditor_token),
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    types = [item["recording_type"] for item in body["items"]]
+    assert types == sorted(types)
+    assert body["total"] == 2
 
 # --- recording streaming ----------------------------------------------------
 

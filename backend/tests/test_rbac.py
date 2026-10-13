@@ -75,3 +75,50 @@ async def test_auditor_cannot_approve(db_session: AsyncSession):
     with pytest.raises(HTTPException) as exc_info:
         await checker(request=None, current_user=auditor, db=db_session)
     assert exc_info.value.status_code == 403
+
+async def test_role_checker_rejects_inactive_role(db_session: AsyncSession):
+    admin = await _get_user(db_session, "admin")
+    admin_role = next(
+        ur.role for ur in admin.roles
+        if ur.role and ur.role.name == "ADMIN"
+    )
+    original_active = admin_role.is_active
+
+    try:
+        admin_role.is_active = False
+        await db_session.flush()
+
+        checker = RoleChecker(["ADMIN"])
+
+        with pytest.raises(HTTPException) as exc_info:
+            await checker(current_user=admin)
+
+        assert exc_info.value.status_code == 403
+    finally:
+        admin_role.is_active = original_active
+        await db_session.flush()
+
+
+async def test_permission_checker_rejects_inactive_admin_role(
+    db_session: AsyncSession,
+):
+    admin = await _get_user(db_session, "admin")
+    admin_role = next(
+        ur.role for ur in admin.roles
+        if ur.role and ur.role.name == "ADMIN"
+    )
+    original_active = admin_role.is_active
+
+    try:
+        admin_role.is_active = False
+        await db_session.flush()
+
+        checker = PermissionChecker("vault", "manage")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await checker(request=None, current_user=admin, db=db_session)
+
+        assert exc_info.value.status_code == 403
+    finally:
+        admin_role.is_active = original_active
+        await db_session.flush()

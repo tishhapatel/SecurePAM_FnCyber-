@@ -24,6 +24,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import apply_sorting, paginate
+from app.schemas.common import PaginatedResponse, PaginationParams
 from app.core.audit import client_ip, write_audit_log
 from app.core.config import settings
 from app.core.deps import PermissionChecker, get_db, user_has_permission
@@ -46,6 +48,7 @@ router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 LIVE_STATUSES = {"CREATED", "STARTING", "ACTIVE"}
 _SESSION_STATUSES = {"CREATED", "STARTING", "ACTIVE", "TERMINATING", "COMPLETED", "FAILED", "EXPIRED"}
+_SORTABLE_COLUMNS = {"created_at", "start_time", "end_time", "status", "protocol", "session_number"}
 _jit = JITService()
 
 
@@ -86,22 +89,49 @@ async def _get_visible_session_or_404(db: AsyncSession, session_id: uuid.UUID, u
     return session
 
 
-@router.get("/", response_model=List[SessionResponse])
+
+@router.get("/", response_model=PaginatedResponse[SessionResponse])
 async def list_sessions(
+    pagination: PaginationParams = Depends(),
     status_filter: Optional[str] = Query(None, alias="status", max_length=20),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("sessions", "read", "read_own")),
+    current_user: User = Depends(
+        PermissionChecker("sessions", "read", "read_own")
+    ),
 ):
-    """List sessions (all, or only the caller's), optionally filtered by status."""
-    query = select(Session).order_by(Session.created_at.desc())
+    """List sessions visible to the caller, with optional status filtering and pagination."""
+    query = select(Session)
+
+    # Preserve the existing ownership restriction.
     if not _can_view_all(current_user):
         query = query.where(Session.user_id == current_user.id)
+
+    # Preserve existing status validation.
     if status_filter:
-        if status_filter.upper() not in _SESSION_STATUSES:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown session status")
-        query = query.where(Session.status == status_filter.upper())
-    result = await db.execute(query)
-    return result.scalars().all()
+        normalized_status = status_filter.upper()
+        if normalized_status not in _SESSION_STATUSES:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Unknown session status",
+            )
+        query = query.where(Session.status == normalized_status)
+
+    query = apply_sorting(
+        query,
+        Session,
+        pagination.sort_by,
+        pagination.sort_order,
+        _SORTABLE_COLUMNS,
+    )
+
+    # Preserve newest-first ordering when sorting isn't allowlisted.
+    if not pagination.sort_by or pagination.sort_by not in _SORTABLE_COLUMNS:
+        query = query.order_by(Session.created_at.desc())
+
+    return await paginate(
+        db, query, pagination, schema=SessionResponse
+    )
+
 
 
 @router.get("/{session_id}", response_model=SessionResponse)

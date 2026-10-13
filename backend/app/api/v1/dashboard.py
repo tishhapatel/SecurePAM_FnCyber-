@@ -7,7 +7,7 @@ No hard-coded numbers.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,7 +115,7 @@ async def get_dashboard_summary(
 
 @router.get("/activity", response_model=list[DashboardActivity])
 async def get_recent_activity(
-    limit: int = 20,
+    limit: int = Query(default=20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -123,7 +123,7 @@ async def get_recent_activity(
     result = await db.execute(
         select(AuditLog)
         .order_by(AuditLog.timestamp.desc())
-        .limit(min(limit, 50))
+        .limit(limit)
     )
     events = result.scalars().all()
 

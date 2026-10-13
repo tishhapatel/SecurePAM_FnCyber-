@@ -5,7 +5,8 @@ these yet, so they're exercised directly against the seeded Asset rows.
 
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+import pytest
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,3 +72,13 @@ async def test_apply_sorting_orders_by_allowed_column(db_session: AsyncSession):
     result = await db_session.execute(sorted_query)
     names = [row.name for row in result.scalars().all()]
     assert names == sorted(names)
+
+
+def test_pagination_accepts_valid_sort_orders():
+    assert PaginationParams(sort_order="asc").sort_order == "asc"
+    assert PaginationParams(sort_order="desc").sort_order == "desc"
+
+
+def test_pagination_rejects_invalid_sort_order():
+    with pytest.raises(ValidationError):
+        PaginationParams(sort_order="invalid")

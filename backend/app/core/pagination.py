@@ -1,22 +1,20 @@
 """
-Reusable pagination/sorting utilities for future list endpoints.
+Reusable pagination and sorting utilities for list endpoints.
 
-No endpoint uses these yet (Phase 2 is foundation-hardening only — Assets,
-Applications, etc. CRUD lands in later phases), but the pattern every list
-endpoint should follow is:
+List endpoints should use apply_sorting() with an explicit allowlist of
+sortable columns, then paginate() to apply LIMIT/OFFSET and return a
+PaginatedResponse.
 
-    from app.core.pagination import apply_sorting, paginate
-    from app.schemas.common import PaginationParams, PaginatedResponse
-
-    @router.get("/assets", response_model=PaginatedResponse[AssetOut])
-    async def list_assets(
-        pagination: PaginationParams = Depends(),
-        db: AsyncSession = Depends(get_db),
-    ):
-        query = select(Asset).where(Asset.is_deleted == False)
-        query = apply_sorting(query, Asset, pagination.sort_by, pagination.sort_order,
-                               allowed_columns={"name", "created_at", "criticality"})
-        return await paginate(db, query, pagination, schema=AssetOut)
+Example:
+    query = select(Asset).where(Asset.is_deleted == False)
+    query = apply_sorting(
+        query,
+        Asset,
+        pagination.sort_by,
+        pagination.sort_order,
+        allowed_columns={"name", "created_at", "criticality"},
+    )
+    return await paginate(db, query, pagination, schema=AssetOut)
 """
 
 from typing import Any, Optional, Sequence, Type, TypeVar

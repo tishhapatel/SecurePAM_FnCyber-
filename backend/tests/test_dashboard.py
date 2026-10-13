@@ -1,4 +1,4 @@
-"""Dashboard summary/activity endpoints — real DB-backed counts, never fake numbers."""
+"""Dashboard summary/activity endpoints â€” real DB-backed counts, never fake numbers."""
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -21,7 +21,7 @@ async def test_dashboard_summary_reflects_seeded_assets(client: AsyncClient, adm
     assert resp.status_code == 200
     body = resp.json()
     # Seed data creates exactly 5 assets (WIN-PROD-01, WIN-DEV-01,
-    # LINUX-PROD-01, LINUX-DEV-01, LINUX-STAGING-01) — see app/main.py.
+    # LINUX-PROD-01, LINUX-DEV-01, LINUX-STAGING-01) â€” see app/main.py.
     assert body["registered_assets"] == 5
     assert body["active_sessions"] == 0
     assert body["pending_requests"] == 0
@@ -81,11 +81,17 @@ async def test_dashboard_activity_returns_a_list(client: AsyncClient, operator_t
     assert isinstance(resp.json(), list)
 
 
-async def test_dashboard_activity_limit_is_capped(client: AsyncClient, admin_token: str):
-    resp = await client.get(
-        "/api/v1/dashboard/activity", params={"limit": 999}, headers=auth_header(admin_token)
+async def test_dashboard_activity_rejects_limit_above_maximum(
+    client: AsyncClient,
+    admin_token: str,
+):
+    response = await client.get(
+        "/api/v1/dashboard/activity",
+        params={"limit": 999},
+        headers=auth_header(admin_token),
     )
-    assert resp.status_code == 200
+
+    assert response.status_code == 422
 
 
 async def _create_recording(
@@ -182,3 +188,16 @@ async def test_dashboard_storage_is_zero_without_recordings(
 
     assert response.status_code == 200
     assert response.json()["recording_storage_mb"] == 0.0
+
+
+async def test_dashboard_activity_rejects_invalid_limit(
+    client: AsyncClient,
+    admin_token: str,
+):
+    for limit in (0, -1, 51):
+        response = await client.get(
+            "/api/v1/dashboard/activity",
+            params={"limit": limit},
+            headers=auth_header(admin_token),
+        )
+        assert response.status_code == 422

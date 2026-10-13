@@ -123,7 +123,11 @@ class RoleChecker:
         self,
         current_user: User = Depends(get_current_active_user),
     ) -> User:
-        user_roles = [ur.role.name for ur in current_user.roles if ur.role]
+        user_roles = [
+            ur.role.name
+            for ur in current_user.roles
+            if ur.role and ur.role.is_active
+        ]
         
         if not any(role in user_roles for role in self.required_roles):
             raise HTTPException(
@@ -132,19 +136,23 @@ class RoleChecker:
             )
         return current_user
 
-
 def user_has_permission(user: User, resource: str, action: str) -> bool:
-    """The RBAC rule PermissionChecker enforces, usable outside a FastAPI
-    dependency (e.g. by CredentialService). ADMIN has all permissions."""
-    if any(ur.role and ur.role.name == "ADMIN" for ur in user.roles):
+    """ADMIN has all permissions only while the ADMIN role is active."""
+    active_roles = [
+        ur.role for ur in user.roles
+        if ur.role and ur.role.is_active
+    ]
+
+    if any(role.name == "ADMIN" for role in active_roles):
         return True
+
     required = f"{resource}:{action}"
     return any(
         f"{perm.resource}:{perm.action}" == required
-        for ur in user.roles
-        if ur.role
-        for perm in ur.role.permissions
+        for role in active_roles
+        for perm in role.permissions
     )
+
 
 
 class PermissionChecker:
@@ -172,9 +180,11 @@ class PermissionChecker:
         current_user: User = Depends(get_current_active_user),
         db: AsyncSession = Depends(get_db),
     ) -> User:
+
         required = " | ".join(f"{self.resource}:{a}" for a in self.actions)
 
         if not any(user_has_permission(current_user, self.resource, a) for a in self.actions):
+
             await write_audit_log(
                 db,
                 actor=current_user,

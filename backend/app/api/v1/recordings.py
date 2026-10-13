@@ -20,6 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
+from app.core.pagination import apply_sorting, paginate
+from app.schemas.common import PaginatedResponse, PaginationParams
 from app.core.audit import client_ip, write_audit_log
 from app.core.config import settings
 from app.core.deps import PermissionChecker, get_db
@@ -27,7 +29,13 @@ from app.models.recording import Recording
 from app.models.user import User
 
 router = APIRouter(prefix="/recordings", tags=["Recordings"])
-
+_SORTABLE_COLUMNS = {
+    "created_at",
+    "file_size",
+    "duration_seconds",
+    "status",
+    "recording_type",
+}
 _PLAYABLE_SUFFIXES = ("", ".m4v", ".mp4")
 
 
@@ -54,15 +62,32 @@ def _resolve_inside_storage(file_path: str) -> Optional[Path]:
     return None
 
 
-@router.get("/", response_model=List[RecordingResponse])
+
+@router.get("/", response_model=PaginatedResponse[RecordingResponse])
 async def list_recordings(
+    pagination: PaginationParams = Depends(),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(PermissionChecker("recordings", "read")),
 ):
-    """List all available session recordings."""
-    query = select(Recording).order_by(Recording.created_at.desc())
-    result = await db.execute(query)
-    return result.scalars().all()
+    """List recordings with pagination and allowlisted sorting."""
+    query = select(Recording)
+
+    query = apply_sorting(
+        query,
+        Recording,
+        pagination.sort_by,
+        pagination.sort_order,
+        _SORTABLE_COLUMNS,
+    )
+
+    # Preserve newest-first ordering by default.
+    if not pagination.sort_by or pagination.sort_by not in _SORTABLE_COLUMNS:
+        query = query.order_by(Recording.created_at.desc())
+
+    return await paginate(
+        db, query, pagination, schema=RecordingResponse
+    )
+
 
 
 @router.get("/{recording_id}/stream")
