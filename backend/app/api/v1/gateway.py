@@ -25,13 +25,16 @@ SECURITY INVARIANTS — enforced here, never weakened:
 6. JIT validation uses JITService.validate() — the single authoritative source.
    Missing, expired, wrong-user, wrong-target, or revoked grants are all rejected.
    Fail-closed: if validation cannot be confirmed, access is denied.
-7. The internal auth endpoint (/gateway/internal/auth) is:
-   (a) Not mounted on any public router — only accessible through the
-       FastAPI app, which NGINX reaches internally on the same Docker network.
-   (b) Protected by a pre-shared GATEWAY_AUTH_TOKEN header validated on every call.
-   (c) The session_id is passed by NGINX via X-SecurePAM-Session-ID header.
-       The browser sets this header with its session_id when connecting to NGINX.
-       NGINX then includes it in the auth_request sub-request.
+7. The internal auth endpoint (/gateway/internal/auth) is mounted under
+   /api/v1 like every other route, so it is reachable wherever the backend is:
+   (a) It requires a pre-shared GATEWAY_AUTH_TOKEN (>= 32 chars, never the
+       old placeholder). An unset or weak token rejects every call.
+   (b) The browser proves which session it is using with the gateway
+       credential cookie (<session_id>.<secret>) set by the single-use launch
+       ticket. Only a SHA-256 hash of the secret is stored. A session ID on
+       its own grants nothing and is never accepted from a URL.
+   (c) The application ID comes only from NGINX's URL capture, and the
+       session's own JIT grant must still be valid.
 8. Sessions are created ONLY after JIT authorization is confirmed.
 9. DNS rebinding: registered hostname re-validated at session creation via
    _validate_upstream_dns(). Destination IP is pinned server-side and passed
@@ -45,6 +48,7 @@ Operational considerations:
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 import os
@@ -53,9 +57,12 @@ import secrets
 import socket
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
+
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,6 +102,47 @@ _jit = JITService()
 # Terminal session states — sessions in these states cannot be used for proxy
 # ---------------------------------------------------------------------------
 _TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "EXPIRED"})
+
+# ---------------------------------------------------------------------------
+# Browser credentials
+# ---------------------------------------------------------------------------
+# Starting a session returns a single-use launch ticket. Redeeming it at
+# /gw/apps/{id}/_launch sets the gateway credential cookie, scoped to that
+# application's path. Both are "<session_id>.<secret>"; only SHA-256 hashes
+# of the secrets are stored in the session's metadata.
+GATEWAY_COOKIE_NAME = "securepam_gw"
+LAUNCH_TICKET_TTL_SECONDS = 60
+_MIN_GATEWAY_TOKEN_LENGTH = 32
+_PLACEHOLDER_GATEWAY_TOKEN = "dev-insecure-change-me-in-production"
+
+
+def _hash_secret(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def _new_credential(session_id: UUID) -> tuple[str, str]:
+    """Return (credential, hash_of_secret) for a "<session_id>.<secret>" credential."""
+    secret = secrets.token_urlsafe(32)
+    return f"{session_id}.{secret}", _hash_secret(secret)
+
+
+def _parse_credential(value: Optional[str]) -> Optional[tuple[UUID, str]]:
+    if not value or "." not in value:
+        return None
+    sid, _, secret = value.partition(".")
+    try:
+        return UUID(sid), secret
+    except ValueError:
+        return None
+
+
+def _secret_matches(secret: str, stored_hash: Optional[str]) -> bool:
+    return bool(stored_hash) and secrets.compare_digest(_hash_secret(secret), stored_hash)
+
+
+def _is_admin(user: User) -> bool:
+    """ADMIN only while the ADMIN role itself is active."""
+    return any(ur.role and ur.role.is_active and ur.role.name == "ADMIN" for ur in user.roles)
 
 
 # ---------------------------------------------------------------------------
@@ -233,16 +281,15 @@ class GatewaySessionResponse(BaseModel):
     """
     Returned when a proxy session is successfully created.
 
-    upstream_url is the trusted, server-side-derived upstream the gateway will
-    proxy to. The client MUST NOT use this as a raw proxy target itself — it is
-    returned so the frontend knows which session to connect to. Actual proxying
-    happens via NGINX, not from the browser directly.
+    The internal upstream URL is never returned. launch_url carries a
+    single-use ticket valid for LAUNCH_TICKET_TTL_SECONDS; opening it through
+    the gateway sets the credential cookie and redirects into the application.
     """
     session_id: UUID
     session_number: str
     application_id: UUID
     application_name: str
-    upstream_url: str
+    launch_url: str
     protocol: str
     jit_validated: bool
     jit_grant_id: Optional[UUID]
@@ -599,23 +646,32 @@ def _validate_gateway_auth_token(
     """
     FastAPI dependency that validates the pre-shared GATEWAY_AUTH_TOKEN.
 
-    Only NGINX (on the internal Docker network) should be calling the
-    internal/auth endpoint. The shared token ensures a rogue browser
-    cannot forge auth_request sub-requests directly to the backend.
-
+    Fails closed: when the configured token is empty, the old placeholder or
+    shorter than _MIN_GATEWAY_TOKEN_LENGTH, every call is rejected, so a
+    deployment that forgot to set it cannot be called with a guessable value.
     Uses secrets.compare_digest to prevent timing attacks.
     """
-    if x_gateway_auth_token is None:
+    expected = settings.GATEWAY_AUTH_TOKEN.get_secret_value()
+    if (
+        len(expected) < _MIN_GATEWAY_TOKEN_LENGTH
+        or expected == _PLACEHOLDER_GATEWAY_TOKEN
+    ):
+        logger.error("GATEWAY_AUTH_TOKEN is unset or too weak; rejecting gateway auth request")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Missing gateway auth token.",
+            detail="Gateway authentication is not configured.",
         )
-    expected = settings.GATEWAY_AUTH_TOKEN
-    if not secrets.compare_digest(x_gateway_auth_token, expected):
+    if x_gateway_auth_token is None or not secrets.compare_digest(
+        x_gateway_auth_token.encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid gateway auth token.",
         )
+
+
+def _deny(detail: str = "Access denied.") -> HTTPException:
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 @internal_router.get(
@@ -623,9 +679,9 @@ def _validate_gateway_auth_token(
     summary="NGINX auth_request hook — internal use only",
     description=(
         "Called by NGINX auth_request on every proxied request. "
-        "Returns 200 if the session is active and the JIT grant is valid. "
-        "Returns 403 if any check fails. "
-        "NOT publicly accessible — protected by X-Gateway-Auth-Token."
+        "Returns 200 if the gateway credential belongs to a live session for this "
+        "application whose own JIT grant is still valid. Returns 403 otherwise. "
+        "Protected by X-Gateway-Auth-Token."
     ),
 )
 async def gateway_auth_request(
@@ -633,134 +689,72 @@ async def gateway_auth_request(
     request: Request,
     db: AsyncSession = Depends(get_db),
     _: None = Depends(_validate_gateway_auth_token),
-    x_securepam_session_id: Optional[str] = Header(None, alias="X-SecurePAM-Session-ID"),
+    x_gateway_credential: Optional[str] = Header(None, alias="X-SecurePAM-Gateway-Credential"),
     x_forwarded_app_id: Optional[str] = Header(None, alias="X-SecurePAM-App-ID"),
-    session_id: Optional[str] = Query(None),
 ) -> dict:
     """
     NGINX auth_request sub-request handler.
 
-    Called on EVERY request NGINX proxies through a /gw/apps/{uuid}/ location.
-    Must be fast — it is in the hot path for every proxied request.
+    Headers set by NGINX (never taken from the browser):
+      X-Gateway-Auth-Token            : pre-shared secret (GATEWAY_AUTH_TOKEN)
+      X-SecurePAM-Gateway-Credential  : value of the securepam_gw cookie
+      X-SecurePAM-App-ID              : application UUID captured from the URL
 
-    Headers set by NGINX (not by browser — NGINX strips browser values first):
-      X-Gateway-Auth-Token      : pre-shared secret from GATEWAY_AUTH_TOKEN env var
-      X-SecurePAM-Session-ID    : session UUID from browser's X-SecurePAM-Session-ID header
-      X-SecurePAM-App-ID        : application UUID extracted from the URL by NGINX
+    All checks must pass (fail closed):
+      1. Gateway token valid (dependency above)
+      2. Application ID present and a UUID
+      3. Credential present, its session exists and its secret hash matches
+      4. Session belongs to that application and is not terminal
+      5. Session owner still active
+      6. Application still enabled, ACTIVE and not deleted
+      7. The session's own JIT grant is still ACTIVE and unexpired
 
-    Authorization checks (all must pass — fail closed):
-      1. Token header present and matches GATEWAY_AUTH_TOKEN
-      2. X-SecurePAM-Session-ID present and valid UUID (or query param fallback)
-      3. Session exists in DB
-      4. Session status is STARTING or ACTIVE (not COMPLETED/FAILED/EXPIRED)
-      5. Session application_id matches X-SecurePAM-App-ID (URL-derived, set by NGINX)
-      6. Associated JIT grant still passes JITService.validate()
-      7. Associated application still enabled and not deleted
-
-    Returns 200 on success (NGINX proceeds with proxy_pass).
-    Returns 403 on any failure (NGINX returns 403 to the browser).
-
-    SECURITY NOTE: This endpoint intentionally returns terse error messages
-    so as not to reveal the reason for denial to the browser.
+    Denials are deliberately terse so the browser learns nothing about why.
     """
-    # --- Check session_id (header, query parameter, or original URI fallback) ---
-    effective_sid = x_securepam_session_id or session_id
-    if not effective_sid and request.headers.get("x-original-uri"):
-        from urllib.parse import parse_qs, urlparse
-        orig_parsed = urlparse(request.headers.get("x-original-uri"))
-        orig_qs = parse_qs(orig_parsed.query)
-        if "session_id" in orig_qs:
-            effective_sid = orig_qs["session_id"][0]
-
-    if not effective_sid:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Missing session identifier.",
-        )
-
     try:
-        session_uuid = UUID(effective_sid)
+        url_app_id = UUID(x_forwarded_app_id or "")
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid session identifier.",
-        )
+        raise _deny("Invalid application identifier in request.")
 
-    # --- Load session ---
-    result = await db.execute(
-        select(SessionModel).where(SessionModel.id == session_uuid)
-    )
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Session not found.",
-        )
+    parsed = _parse_credential(x_gateway_credential)
+    if parsed is None:
+        raise _deny("Missing or invalid gateway credential.")
+    session_uuid, secret = parsed
 
-    # --- Session must be in an active state ---
+    session = await db.get(SessionModel, session_uuid)
+    if session is None or not _secret_matches(
+        secret, (session.metadata_ or {}).get("gateway_credential_hash")
+    ):
+        raise _deny("Missing or invalid gateway credential.")
+
+    if session.application_id is None or session.application_id != url_app_id:
+        raise _deny("Session application mismatch.")
     if session.status in _TERMINAL_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Session is not active.",
-        )
+        raise _deny("Session is not active.")
 
-    # --- Application ID must match what NGINX extracted from the URL ---
-    if x_forwarded_app_id:
-        try:
-            url_app_id = UUID(x_forwarded_app_id)
-            if session.application_id != url_app_id:
-                # The session is for a different application than the URL
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Session application mismatch.",
-                )
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid application identifier in request.",
-            )
+    owner = await db.get(User, session.user_id)
+    if owner is None or not owner.is_active:
+        raise _deny()
 
-    # --- Load and validate the associated application ---
-    if session.application_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Session has no application association.",
-        )
+    app = await db.get(Application, session.application_id)
+    if app is None or app.is_deleted or not app.enabled or app.status != "ACTIVE":
+        raise _deny("Application is no longer accessible.")
 
-    app_result = await db.execute(
-        select(Application).where(
-            Application.id == session.application_id,
-            Application.is_deleted == False,  # noqa: E712
-        )
-    )
-    app = app_result.scalar_one_or_none()
-    if app is None or not app.enabled or app.status != "ACTIVE":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Application is no longer accessible.",
-        )
+    # Live revocation check, bound to the grant this session was opened with:
+    # a revoked or expired grant denies the next proxied request, and another
+    # grant the user may hold does not keep this session alive.
+    grant = await db.get(JITGrant, session.jit_grant_id) if session.jit_grant_id else None
+    if (
+        grant is None
+        or grant.user_id != session.user_id
+        or grant.application_id != app.id
+        or not _jit.is_active(grant)
+    ):
+        raise _deny("JIT grant is no longer valid.")
 
-    # --- Re-validate JIT grant ---
-    # This is the live revocation check: if the grant was revoked or expired
-    # since the session was created, this will return None → 403.
-    try:
-        grant = await _jit.validate(
-            db,
-            user_id=session.user_id,
-            target_id=session.application_id,
-            protocol=app.protocol,
-        )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Authorization check failed.",
-        )
-
-    if grant is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="JIT grant is no longer valid.",
-        )
+    # Tells NGINX which session it authorized (used to route /vnc/ requests),
+    # so the browser never has to put a session ID in a URL.
+    response.headers["X-SecurePAM-Session-ID"] = str(session.id)
 
     # --- DNS IP Pinning ---
     # Resolve and validate destination IP at request time.
@@ -863,9 +857,7 @@ async def get_proxy_config(
     - Returns the upstream block needed to proxy to this application.
     - Does NOT expose this to the browser — only to the config manager.
     """
-    # Only ADMINs should call this
-    user_roles = {ur.role.name for ur in current_user.roles if ur.role}
-    if "ADMIN" not in user_roles:
+    if not _is_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin role required to retrieve proxy configuration.",
@@ -959,7 +951,11 @@ async def start_gateway_session(
     # always provides the authoritative access request that licensed this grant.
     request_id_for_session: Optional[UUID] = grant.request_id
 
+    session_id = uuid4()
+    launch_ticket, launch_ticket_hash = _new_credential(session_id)
+
     session = SessionModel(
+        id=session_id,
         session_number=session_number,
         user_id=current_user.id,
         application_id=app_record.id,
@@ -973,6 +969,10 @@ async def start_gateway_session(
         metadata_={
             "upstream_url": upstream_url,
             "access_mode": app_record.access_mode,
+            "launch_ticket_hash": launch_ticket_hash,
+            "launch_ticket_expires_at": (
+                now + timedelta(seconds=LAUNCH_TICKET_TTL_SECONDS)
+            ).isoformat(),
         },
     )
     db.add(session)
@@ -1034,7 +1034,7 @@ async def start_gateway_session(
                 application_id=app_record.id,
                 target_url=upstream_url,
             )
-            vnc_url = browser_info.get("vnc_path", f"/gw/apps/{app_record.id}/vnc/?session_id={session.id}")
+            vnc_url = f"/gw/apps/{app_record.id}/vnc/"
             updated_meta = dict(session.metadata_ or {})
             updated_meta["vnc_path"] = vnc_url
             updated_meta["display"] = browser_info.get("display", ":100")
@@ -1062,7 +1062,7 @@ async def start_gateway_session(
         session_number=session.session_number,
         application_id=app_record.id,
         application_name=app_record.name,
-        upstream_url=upstream_url,
+        launch_url=f"/gw/apps/{app_record.id}/_launch?ticket={launch_ticket}",
         protocol=app_record.protocol,
         jit_validated=True,
         jit_grant_id=grant.id,
@@ -1072,6 +1072,94 @@ async def start_gateway_session(
         vnc_url=vnc_url,
         recording_id=session.recording_id,
     )
+
+
+@router.get(
+    "/apps/{application_id}/launch",
+    summary="Redeem a single-use launch ticket for the gateway credential cookie",
+    description=(
+        "Reached through NGINX at /gw/apps/{id}/_launch. Validates and consumes the "
+        "ticket returned by session creation, sets an HttpOnly cookie scoped to the "
+        "application's gateway path and redirects into the application."
+    ),
+)
+async def launch_gateway_session(
+    application_id: UUID,
+    request: Request,
+    ticket: str = Query(..., max_length=200),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    parsed = _parse_credential(ticket)
+    if parsed is None:
+        raise _deny("Invalid or expired launch ticket.")
+    session_uuid, secret = parsed
+
+    # Row lock: two concurrent redemptions of one ticket cannot both succeed.
+    session = (
+        await db.execute(
+            select(SessionModel).where(SessionModel.id == session_uuid).with_for_update()
+        )
+    ).scalar_one_or_none()
+    meta = dict((session.metadata_ or {}) if session else {})
+    expires_at = meta.get("launch_ticket_expires_at")
+    if (
+        session is None
+        or session.application_id != application_id
+        or session.status in _TERMINAL_STATUSES
+        or not _secret_matches(secret, meta.get("launch_ticket_hash"))
+        or not expires_at
+        or datetime.fromisoformat(expires_at) <= datetime.now(timezone.utc)
+    ):
+        raise _deny("Invalid or expired launch ticket.")
+
+    owner = await db.get(User, session.user_id)
+    if owner is None or not owner.is_active:
+        raise _deny("Invalid or expired launch ticket.")
+
+    grant = await db.get(JITGrant, session.jit_grant_id) if session.jit_grant_id else None
+    if (
+        grant is None
+        or grant.user_id != session.user_id
+        or grant.application_id != application_id
+        or not _jit.is_active(grant)
+    ):
+        raise _deny("JIT grant is no longer valid.")
+
+    credential, credential_hash = _new_credential(session.id)
+    meta.pop("launch_ticket_hash", None)
+    meta.pop("launch_ticket_expires_at", None)
+    meta["gateway_credential_hash"] = credential_hash
+    session.metadata_ = meta  # reassign so the JSON column is marked dirty
+
+    await write_audit_log(
+        db,
+        actor=owner,
+        action="GATEWAY_SESSION_LAUNCHED",
+        target_type="application",
+        target_id=str(application_id),
+        session_id=session.id,
+        source_ip=client_ip(request),
+        result="SUCCESS",
+        severity="INFO",
+        metadata={"session_number": session.session_number},
+    )
+    await db.commit()
+
+    base_path = f"/gw/apps/{application_id}/"
+    target = base_path + ("vnc/" if meta.get("access_mode") == "ISOLATED_BROWSER" else "")
+    redirect = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+    redirect.set_cookie(
+        GATEWAY_COOKIE_NAME,
+        credential,
+        max_age=max(1, int((grant.expires_at - datetime.now(timezone.utc)).total_seconds())),
+        path=base_path,
+        httponly=True,
+        secure=settings.GATEWAY_COOKIE_SECURE,
+        samesite="strict",
+    )
+    redirect.headers["Cache-Control"] = "no-store"
+    redirect.headers["Referrer-Policy"] = "no-referrer"
+    return redirect
 
 
 @router.post(
@@ -1118,8 +1206,7 @@ async def terminate_gateway_session(
         )
 
     # Authorization: owner or ADMIN
-    user_roles = {ur.role.name for ur in current_user.roles if ur.role}
-    if session.user_id != current_user.id and "ADMIN" not in user_roles:
+    if session.user_id != current_user.id and not _is_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not authorized to terminate this session.",
@@ -1278,8 +1365,7 @@ async def sync_gateway_config(
     Writes one upstream .conf file per application, removes configs for
     non-eligible apps, then signals a reload. Returns a summary.
     """
-    user_roles = {ur.role.name for ur in current_user.roles if ur.role}
-    if "ADMIN" not in user_roles:
+    if not _is_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin role required to sync gateway configuration.",
@@ -1330,8 +1416,7 @@ async def remove_app_config(
     current_user: User = Depends(get_current_active_user),
 ) -> dict:
     """Remove NGINX upstream config and signal reload. ADMIN only."""
-    user_roles = {ur.role.name for ur in current_user.roles if ur.role}
-    if "ADMIN" not in user_roles:
+    if not _is_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin role required.",

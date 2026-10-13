@@ -60,15 +60,29 @@ def test_production_accepts_strong_gateway_auth_token():
         OPENBAO_TOKEN="t",
         GATEWAY_AUTH_TOKEN=STRONG_TOKEN,
     )
-    assert s.GATEWAY_AUTH_TOKEN == STRONG_TOKEN
+    assert s.GATEWAY_AUTH_TOKEN.get_secret_value() == STRONG_TOKEN
     assert s.DEV_MODE is False
 
 
 def test_development_allows_default_gateway_auth_token():
-    """Development environment permits default dev token for local work."""
+    """Settings load in development; the auth hook itself still refuses the
+    placeholder (see test_gateway_security)."""
     s = make_settings(
         ENVIRONMENT="development",
         DEV_MODE=True,
         GATEWAY_AUTH_TOKEN=DEFAULT_TOKEN,
     )
-    assert s.GATEWAY_AUTH_TOKEN == DEFAULT_TOKEN
+    assert s.GATEWAY_AUTH_TOKEN.get_secret_value() == DEFAULT_TOKEN
+
+
+def test_production_allows_unset_gateway_token():
+    """No gateway deployed: startup succeeds and the auth hook rejects everything."""
+    s = make_settings(
+        ENVIRONMENT="production",
+        DEV_MODE=False,
+        SECRET_KEY=STRONG_SECRET,
+        SECRET_PROVIDER="openbao",
+        OPENBAO_ADDR="https://bao:8200",
+        OPENBAO_TOKEN="t",
+    )
+    assert s.GATEWAY_AUTH_TOKEN.get_secret_value() == ""

@@ -26,7 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import auth_header, issue_token
 
-from app.api.v1.gateway import _ip_is_denied, _validate_upstream_dns
+from pydantic import SecretStr
+
+from app.api.v1.gateway import GATEWAY_COOKIE_NAME, _ip_is_denied, _new_credential, _validate_upstream_dns
 from app.core.config import settings
 from app.core.ssrf import SSRFValidationError, validate_application_target
 from app.database.session import async_session_factory
@@ -124,16 +126,47 @@ async def _get_user_id(username: str):
         return user.id
 
 
+GATEWAY_TOKEN = "t" * 48
+
+# session_id -> "<session_id>.<secret>" gateway credential (the cookie value)
+_CREDENTIALS: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _gateway_token(monkeypatch):
+    monkeypatch.setattr(settings, "GATEWAY_AUTH_TOKEN", SecretStr(GATEWAY_TOKEN))
+
+
+async def _launch(client: AsyncClient, start: dict) -> str:
+    """Redeem a session's launch ticket the way the browser does; return the cookie value."""
+    resp = await client.get(f"/api/v1/gateway/apps/{start['application_id']}/launch",
+                            params={"ticket": start["launch_url"].split("ticket=", 1)[1]})
+    assert resp.status_code == 303, resp.text
+    credential = resp.cookies[GATEWAY_COOKIE_NAME]
+    _CREDENTIALS[start["session_id"]] = credential
+    return credential
+
+
+def _direct_credential(session_id) -> str:
+    """Credential hash for a Session row a test inserts directly."""
+    credential, credential_hash = _new_credential(session_id)
+    _CREDENTIALS[str(session_id)] = credential
+    return credential_hash
+
+
 def _auth_hook_headers(
     session_id: str | None = None,
     app_id: str | None = None,
     token: str | None = None,
 ) -> dict:
-    """Build the headers NGINX sends to the auth_request endpoint."""
-    token_value = token if token is not None else settings.GATEWAY_AUTH_TOKEN
-    headers = {"X-Gateway-Auth-Token": token_value}
+    """Build the headers NGINX sends to the auth_request endpoint.
+
+    session_id is translated to the credential that session's launch issued;
+    an unknown value is sent as-is (and must be rejected).
+    """
+    headers = {"X-Gateway-Auth-Token": token if token is not None else GATEWAY_TOKEN}
     if session_id is not None:
-        headers["X-SecurePAM-Session-ID"] = session_id
+        headers["X-SecurePAM-Gateway-Credential"] = _CREDENTIALS.get(session_id, session_id)
     if app_id is not None:
         headers["X-SecurePAM-App-ID"] = app_id
     return headers
@@ -166,7 +199,9 @@ async def test_start_session_standard_proxy_with_valid_jit_grant(
     assert data["jit_validated"] is True
     assert data["jit_grant_id"] == grant_id
     assert data["session_id"] is not None
-    assert data["upstream_url"] == "http://testapp.internal:8080"
+    assert "upstream_url" not in data
+    assert "testapp.internal" not in resp.text
+    assert data["launch_url"].startswith(f"/gw/apps/{app_id}/_launch?ticket=")
     assert "jit_stubbed" not in data
 
 
@@ -234,7 +269,7 @@ async def test_no_upstream_override_via_query_param(
         headers=auth_header(operator_token),
     )
     assert resp.status_code == 201
-    assert "attacker.example.com" not in resp.json()["upstream_url"]
+    assert "attacker.example.com" not in resp.text
 
 
 @pytest.mark.asyncio
@@ -250,7 +285,7 @@ async def test_no_upstream_override_via_header(
         headers={**auth_header(operator_token), "X-Upstream": "http://evil.example.com"},
     )
     assert resp.status_code == 201
-    assert "evil.example.com" not in resp.json()["upstream_url"]
+    assert "evil.example.com" not in resp.text
 
 
 @pytest.mark.asyncio
@@ -279,6 +314,7 @@ async def test_session_owner_can_terminate(client: AsyncClient, admin_token: str
     start = await client.post(f"/api/v1/gateway/apps/{app['id']}/session", headers=auth_header(operator_token))
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
     term = await client.post(
         f"/api/v1/gateway/apps/{app['id']}/session/{session_id}/terminate",
         headers=auth_header(operator_token),
@@ -462,6 +498,7 @@ async def test_session_jit_grant_and_request_id_populated(
     resp = await client.post(f"/api/v1/gateway/apps/{app['id']}/session", headers=auth_header(operator_token))
     assert resp.status_code == 201
     session_id = resp.json()["session_id"]
+    await _launch(client, resp.json())
     result = await db_session.execute(select(SessionModel).where(SessionModel.id == session_id))
     session = result.scalar_one()
     assert session.jit_grant_id == grant_id
@@ -618,6 +655,7 @@ async def test_auth_hook_valid_active_session_returns_200(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
 
     # Simulate NGINX auth_request
     resp = await client.get(
@@ -646,6 +684,7 @@ async def test_auth_hook_completed_session_returns_403(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
 
     # Verify it works before termination
     pre = await client.get(
@@ -691,6 +730,8 @@ async def test_auth_hook_expired_session_status_returns_403(
             status="EXPIRED",
             jit_grant_id=grant.id,
             request_id=grant.request_id,
+            id=(direct_id := uuid4()),
+            metadata_={"gateway_credential_hash": _direct_credential(direct_id)},
         )
         db.add(session)
         await db.commit()
@@ -724,6 +765,8 @@ async def test_auth_hook_failed_session_status_returns_403(
             status="FAILED",
             jit_grant_id=grant.id,
             request_id=grant.request_id,
+            id=(direct_id := uuid4()),
+            metadata_={"gateway_credential_hash": _direct_credential(direct_id)},
         )
         db.add(session)
         await db.commit()
@@ -761,6 +804,7 @@ async def test_auth_hook_revoked_jit_grant_returns_403(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
     grant_id = start.json()["jit_grant_id"]
 
     # Verify auth works initially
@@ -808,6 +852,7 @@ async def test_auth_hook_expired_jit_grant_returns_403(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
     grant_id = start.json()["jit_grant_id"]
 
     # Force-expire the grant by setting expires_at to the past
@@ -848,6 +893,7 @@ async def test_auth_hook_app_id_mismatch_returns_403(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
 
     # Send session for appA but claim appB in the URL-derived header
     resp = await client.get(
@@ -876,6 +922,7 @@ async def test_auth_hook_disabled_app_returns_403(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
 
     # Disable the app
     await client.patch(f"/api/v1/applications/{app_id}", json={"enabled": False}, headers=auth_header(admin_token))
@@ -911,6 +958,7 @@ async def test_auth_hook_deleted_app_returns_403(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
 
     # Terminate session first (app delete blocks if active sessions exist)
     term = await client.post(
@@ -970,6 +1018,7 @@ async def test_live_revocation_terminate_then_auth_denied(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    await _launch(client, start.json())
 
     # Step 2: Auth check passes
     auth_before = await client.get(
@@ -1116,7 +1165,7 @@ async def test_day5_isolated_browser_session_creation_with_jit(
     assert data["jit_grant_id"] == grant_id
     assert data["vnc_url"] is not None
     assert f"/gw/apps/{app_id}/vnc/" in data["vnc_url"]
-    assert "session_id=" in data["vnc_url"]
+    assert "session_id=" not in data["vnc_url"]
 
     # Verify session in DB has ISOLATED_BROWSER access_mode and vnc_path in metadata
     session_uuid = UUID(data["session_id"])
@@ -1172,6 +1221,7 @@ async def test_day5_isolated_browser_termination_and_cleanup(
     )
     assert create_resp.status_code == 201
     session_id = create_resp.json()["session_id"]
+    await _launch(client, create_resp.json())
 
     # 2. Terminate session
     term_resp = await client.post(
@@ -1214,6 +1264,7 @@ async def test_day5_dns_ip_pinning_response_headers(
     )
     assert create_resp.status_code == 201
     session_id = create_resp.json()["session_id"]
+    await _launch(client, create_resp.json())
 
     # Call internal auth hook
     auth_resp = await client.get(
@@ -1313,12 +1364,12 @@ async def test_day5_application_lifecycle_sync_create_patch_delete(
 
 
 @pytest.mark.asyncio
-async def test_internal_auth_query_param_fallback(
+async def test_session_id_alone_is_not_a_credential(
     client: AsyncClient,
     admin_token: str,
     operator_token: str,
 ):
-    """Verify internal auth hook accepts session_id query param for browser tabs."""
+    """A session ID in a header, query string or original URI grants nothing."""
     app = await _create_app(client, admin_token)
     app_id = app["id"]
     operator_id = await _get_user_id("operator")
@@ -1332,27 +1383,25 @@ async def test_internal_auth_query_param_fallback(
     )
     assert start.status_code == 201
     session_id = start.json()["session_id"]
+    credential = await _launch(client, start.json())
+    base = {"X-Gateway-Auth-Token": GATEWAY_TOKEN, "X-SecurePAM-App-ID": app_id}
 
-    # Query param fallback succeeds with 200 without X-SecurePAM-Session-ID header
-    resp = await client.get(
-        f"/api/v1/gateway/internal/auth?session_id={session_id}",
-        headers={
-            "X-Gateway-Auth-Token": settings.GATEWAY_AUTH_TOKEN,
-            "X-SecurePAM-App-ID": str(app_id),
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    for attempt in (
+        client.get(f"/api/v1/gateway/internal/auth?session_id={session_id}", headers=base),
+        client.get("/api/v1/gateway/internal/auth",
+                   headers={**base, "X-SecurePAM-Session-ID": session_id}),
+        client.get("/api/v1/gateway/internal/auth",
+                   headers={**base, "X-Original-URI": f"/gw/apps/{app_id}/?session_id={session_id}"}),
+        client.get("/api/v1/gateway/internal/auth",
+                   headers={**base, "X-SecurePAM-Gateway-Credential": session_id}),
+        client.get("/api/v1/gateway/internal/auth",
+                   headers={**base, "X-SecurePAM-Gateway-Credential": f"{session_id}.wrong-secret"}),
+    ):
+        assert (await attempt).status_code == 403
 
-    # Query param with unknown session is rejected with 403
-    bad_resp = await client.get(
-        f"/api/v1/gateway/internal/auth?session_id={uuid4()}",
-        headers={
-            "X-Gateway-Auth-Token": settings.GATEWAY_AUTH_TOKEN,
-            "X-SecurePAM-App-ID": str(app_id),
-        },
-    )
-    assert bad_resp.status_code == 403
+    ok = await client.get("/api/v1/gateway/internal/auth",
+                          headers={**base, "X-SecurePAM-Gateway-Credential": credential})
+    assert ok.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -1460,6 +1509,7 @@ async def test_day8_client_headers_cannot_override_pinned_ip(
     )
     assert create_resp.status_code == 201
     session_id = create_resp.json()["session_id"]
+    await _launch(client, create_resp.json())
 
     # Attempt to spoof upstream target and host via client headers
     headers = _auth_hook_headers(session_id=session_id, app_id=app_id)

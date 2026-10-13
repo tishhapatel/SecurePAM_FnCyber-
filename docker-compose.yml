@@ -18,7 +18,7 @@ services:
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
-      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_dev_password}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
     volumes:
       - keycloak_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -144,7 +144,7 @@ services:
       GATEWAY_TEST_UPSTREAM: ${GATEWAY_TEST_UPSTREAM:-backend:8000}
       # Auth token for NGINX→backend auth_request validation.
       # Must match GATEWAY_AUTH_TOKEN in the backend .env.
-      GATEWAY_AUTH_TOKEN: ${GATEWAY_AUTH_TOKEN:-dev-insecure-change-me-in-production}
+      GATEWAY_AUTH_TOKEN: ${GATEWAY_AUTH_TOKEN:-}  # no default; the container refuses to start without one
       # Internal control port — reachable from backend on Docker net, NOT from host
       GATEWAY_NGINX_CONTROL_PORT: ${GATEWAY_NGINX_CONTROL_PORT:-8081}
       # Browser isolation service
@@ -177,7 +177,7 @@ services:
     profiles: ["gateway"]
     environment:
       PORT: 6080
-      BROWSER_ISOLATION_TOKEN: ${GATEWAY_AUTH_TOKEN:-dev-insecure-change-me-in-production}
+      BROWSER_ISOLATION_TOKEN: ${GATEWAY_AUTH_TOKEN:-}  # no default; the service refuses to start without one
     ports:
       - "127.0.0.1:${BROWSER_ISOLATION_HOST_PORT:-16080}:6080"
     networks:
@@ -206,7 +206,7 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
-      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_dev_password}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
       KC_HOSTNAME: localhost
       KC_HOSTNAME_PORT: "8080"
       KC_HTTP_ENABLED: "true"

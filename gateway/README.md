@@ -94,9 +94,11 @@ These invariants are enforced by code and verified by tests. They must **never**
 Configure the following in `backend/.env` (refer to `.env.example`):
 
 ```bash
-# Gateway Authentication Secret (Must be >= 32 characters in production)
+# Gateway authentication secret: required, >= 32 characters of A-Z a-z 0-9 _ -.
+# No default. While unset, NGINX and browser isolation refuse to start and the
+# backend's auth hook rejects every request.
 # Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
-GATEWAY_AUTH_TOKEN=dev-insecure-change-me-in-production
+GATEWAY_AUTH_TOKEN=
 
 # Shared config directory for NGINX upstream blocks (mounted in docker-compose)
 GATEWAY_CONFIG_DIR=/gateway-config
@@ -161,7 +163,7 @@ curl -i http://localhost:17000/gw/test-health
     "session_number": "SES-20261013-0001",
     "application_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
     "application_name": "Internal Admin Portal",
-    "upstream_url": "http://internal-portal.local:8080",
+    "launch_url": "/gw/apps/f47ac10b-58cc-4372-a567-0e02b2c3d479/_launch?ticket=c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c.<single-use secret>",
     "protocol": "HTTP",
     "jit_validated": true,
     "jit_grant_id": "e8f1b2c3-d4e5-6f7a-8b9c-0d1e2f3a4b5c",
@@ -172,7 +174,18 @@ curl -i http://localhost:17000/gw/test-health
     "recording_id": "a9b8c7d6-e5f4-3a2b-1c0d-9e8f7a6b5c4d"
   }
   ```
-  *(For `ISOLATED_BROWSER` mode, `vnc_url` contains `/gw/apps/{application_id}/vnc/?session_id={session_id}`).*
+  The internal upstream URL is never returned. Open `launch_url` through the
+  gateway within 60 seconds: the ticket is single-use, and redeeming it sets an
+  HttpOnly, `SameSite=Strict` cookie (`securepam_gw`) scoped to
+  `/gw/apps/{application_id}/`, then redirects into the application (or to
+  `/vnc/` for `ISOLATED_BROWSER`, whose `vnc_url` is `/gw/apps/{application_id}/vnc/`).
+  A session ID by itself grants nothing.
+
+### A2. Launch (via NGINX only)
+- **Gateway path:** `GET /gw/apps/{application_id}/_launch?ticket=...` → backend
+  `GET /api/v1/gateway/apps/{application_id}/launch`. Not access-logged by NGINX.
+- **Response:** `303 See Other` with `Set-Cookie: securepam_gw=...`, or `403`
+  for an unknown, reused, expired or other-application ticket.
 
 ### B. Terminate Gateway Session
 - **Endpoint:** `POST /api/v1/gateway/apps/{application_id}/session/{session_id}/terminate`
@@ -191,10 +204,13 @@ curl -i http://localhost:17000/gw/test-health
 - **Endpoint:** `GET /api/v1/gateway/internal/auth`
 - **Headers:**
   - `X-Gateway-Auth-Token`: pre-shared secret
-  - `X-SecurePAM-Session-ID`: session UUID
-  - `X-SecurePAM-App-ID`: application UUID
+  - `X-SecurePAM-Gateway-Credential`: value of the `securepam_gw` cookie (set by NGINX from the cookie only)
+  - `X-SecurePAM-App-ID`: application UUID from the URL (required)
+- **Checks:** credential secret matches the stored hash, session belongs to that
+  application and is live, owner is active, application is enabled, and the
+  session's own JIT grant is still active.
 - **Response:**
-  - `HTTP 200 OK`: authorized. Emits `X-SecurePAM-Upstream-Target: <ip>:<port>`, `X-SecurePAM-Upstream-Host: <host>`, and `X-SecurePAM-Upstream-Authorization: Basic/Bearer <token>`.
+  - `HTTP 200 OK`: authorized. Emits `X-SecurePAM-Session-ID` (for NGINX's `/vnc/` routing), `X-SecurePAM-Upstream-Target: <ip>:<port>`, `X-SecurePAM-Upstream-Host: <host>`, and `X-SecurePAM-Upstream-Authorization: Basic/Bearer <token>`.
   - `HTTP 403 Forbidden`: unauthorized, expired, revoked, mismatched, or SSRF-denied.
 
 ---

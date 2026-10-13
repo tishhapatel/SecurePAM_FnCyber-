@@ -112,7 +112,7 @@ If the backend validates and returns `X-SecurePAM-Upstream-Target: 10.0.1.5:8080
 | `GATEWAY_BACKEND_HOST` | `backend` | Internal hostname of FastAPI backend container. |
 | `GATEWAY_BACKEND_PORT` | `8000` | Port of FastAPI backend. |
 | `GATEWAY_TEST_UPSTREAM` | `backend:8000` | Target for `/gw/test-health`. |
-| `GATEWAY_AUTH_TOKEN` | `dev-insecure-change-me-in-production` | Pre-shared secret validated on every `auth_request` call to backend. |
+| `GATEWAY_AUTH_TOKEN` | *(none — required)* | Pre-shared secret validated on every `auth_request` call to backend. At least 32 characters of `A-Z a-z 0-9 _ -`; the container exits otherwise. |
 | `GATEWAY_NGINX_CONTROL_PORT` | `8081` | Port for internal reload triggers (not exposed to internet). |
 | `GATEWAY_BROWSER_ISOLATION_HOST`| `browser-isolation` | Internal Docker service name for browser isolation daemon. |
 | `GATEWAY_BROWSER_ISOLATION_PORT`| `6080` | Port for browser isolation daemon. |
@@ -139,7 +139,7 @@ If the backend validates and returns `X-SecurePAM-Upstream-Target: 10.0.1.5:8080
 - **Check:**
   1. Has the session been created? Check `Session.status` (`STARTING` or `ACTIVE` required).
   2. Does a valid JIT grant exist? Check `JITGrant.expires_at` and status.
-  3. Are you sending `X-SecurePAM-Session-ID` header or `?session_id=` query param matching the active session?
+  3. Did the browser open the session's `launch_url` (within 60 s, once) so it holds the `securepam_gw` cookie for this application's path? Session IDs in headers or query strings are ignored.
   4. Does the `application_id` in the URL match the session's assigned `application_id`?
 
 ### Issue 4: HTTP 502 Bad Gateway / Upstream Unavailable

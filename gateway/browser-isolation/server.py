@@ -10,6 +10,7 @@ Provides container-level process isolation for web application sessions:
 - Cleans up all child processes, sockets, and user data directories on termination
 """
 
+import hmac
 import json
 import logging
 import os
@@ -30,7 +31,11 @@ logging.basicConfig(
 logger = logging.getLogger("browser-isolation")
 
 PORT = int(os.environ.get("PORT", "6080"))
-AUTH_TOKEN = os.environ.get("BROWSER_ISOLATION_TOKEN", "dev-insecure-change-me-in-production")
+# Shared with the backend (GATEWAY_AUTH_TOKEN). No default: main() refuses to
+# start without a strong value.
+AUTH_TOKEN = os.environ.get("BROWSER_ISOLATION_TOKEN", "")
+_PLACEHOLDER_TOKEN = "dev-insecure-change-me-in-production"
+_MIN_TOKEN_LENGTH = 32
 SESSION_BASE_DIR = "/tmp/browser_sessions"
 RECORDING_DIR = os.environ.get("RECORDING_STORAGE_PATH", "/data/recordings")
 
@@ -134,10 +139,11 @@ class BrowserIsolationHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _verify_auth(self) -> bool:
-        token = self.headers.get("X-Gateway-Auth-Token")
-        if not token or token != AUTH_TOKEN:
+        # Fail closed even if main()'s startup check was bypassed (e.g. imported).
+        if len(AUTH_TOKEN) < _MIN_TOKEN_LENGTH or AUTH_TOKEN == _PLACEHOLDER_TOKEN:
             return False
-        return True
+        token = self.headers.get("X-Gateway-Auth-Token") or ""
+        return hmac.compare_digest(token.encode("utf-8"), AUTH_TOKEN.encode("utf-8"))
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -225,15 +231,18 @@ class BrowserIsolationHandler(BaseHTTPRequestHandler):
     <header>
         <div>
             <strong>SecurePAM Browser Isolation</strong>
-            <span class="banner"> | Target: {session.get('target_url')}</span>
+            <span class="banner"> | Session {session_id[:8]}</span>
         </div>
         <span class="badge">ISOLATED PROCESS</span>
     </header>
     <div id="screen">
         <div class="browser-box">
-            <div class="url-bar">🔒 Protected PAM Session ({session_id[:8]}) — Navigating to authorized application</div>
-            <div class="iframe-container">
-                <iframe src="{session.get('target_url')}" sandbox="allow-scripts allow-forms allow-same-origin"></iframe>
+            <div class="url-bar">🔒 Protected PAM Session ({session_id[:8]})</div>
+            <div class="iframe-container" style="display:flex;align-items:center;justify-content:center;color:#334155;">
+                <!-- The application runs only in the server-side browser. Its URL
+                     is never sent to this page, and the page never loads it. The
+                     noVNC stream is not wired through the gateway yet. -->
+                <p>The isolated browser is running on the server. Remote display streaming is not yet available.</p>
             </div>
         </div>
     </div>
@@ -430,6 +439,9 @@ def handle_shutdown(signum, frame):
 
 
 def main():
+    if len(AUTH_TOKEN) < _MIN_TOKEN_LENGTH or AUTH_TOKEN == _PLACEHOLDER_TOKEN:
+        logger.error("BROWSER_ISOLATION_TOKEN must be set to at least %d characters (not the placeholder)", _MIN_TOKEN_LENGTH)
+        sys.exit(1)
     os.makedirs(SESSION_BASE_DIR, exist_ok=True)
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)

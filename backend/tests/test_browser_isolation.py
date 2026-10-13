@@ -24,6 +24,11 @@ spec.loader.exec_module(bi_server)
 from app.services.browser_isolation_service import BrowserIsolationService
 
 
+@pytest.fixture(autouse=True)
+def _daemon_token(monkeypatch):
+    monkeypatch.setattr(bi_server, "AUTH_TOKEN", "b" * 48)
+
+
 class DummyRequest:
     def __init__(self, method: str, path: str, headers: dict = None, body: bytes = b""):
         self.method = method
@@ -98,6 +103,23 @@ def test_daemon_launch_without_auth_token_rejected_403():
     assert "Invalid or missing gateway auth token" in data["detail"]
 
 
+@pytest.mark.parametrize("configured", ["", "dev-insecure-change-me-in-production", "short"])
+def test_daemon_unset_or_weak_token_rejects_matching_header(monkeypatch, configured):
+    monkeypatch.setattr(bi_server, "AUTH_TOKEN", configured)
+    status, _, _, _ = invoke_handler(
+        "POST", "/sessions/launch",
+        headers={"X-Gateway-Auth-Token": configured},
+        body={"session_id": str(uuid4()), "application_id": str(uuid4()), "target_url": "http://example.com"},
+    )
+    assert status == 403
+
+
+def test_daemon_refuses_to_start_without_strong_token(monkeypatch):
+    monkeypatch.setattr(bi_server, "AUTH_TOKEN", "")
+    with pytest.raises(SystemExit):
+        bi_server.main()
+
+
 def test_daemon_launch_invalid_uuid_rejected_422():
     status, _, data, _ = invoke_handler(
         "POST", "/sessions/launch",
@@ -151,7 +173,7 @@ def test_daemon_launch_success_and_lifecycle():
     assert "text/html" in hdrs.get("Content-Type", "")
     html = raw.decode("utf-8")
     assert "SecurePAM Browser Isolation" in html
-    assert target in html
+    assert target not in html  # the internal target never reaches the user's browser
 
     # 4. Terminate session
     status, _, term_data, _ = invoke_handler(
@@ -225,7 +247,7 @@ def test_cross_session_and_cross_application_isolation():
     # Authorized access to session 1 via app A succeeds
     status, _, _, raw1 = invoke_handler("GET", f"/vnc/{app_a}?session_id={s1_id}")
     assert status == 200
-    assert "http://app-a.internal:8080" in raw1.decode("utf-8")
+    assert "http://app-a.internal:8080" not in raw1.decode("utf-8")
 
     # Unauthorized cross-app access: session 1 with app B path is rejected
     status, _, err, _ = invoke_handler("GET", f"/vnc/{app_b}?session_id={s1_id}")

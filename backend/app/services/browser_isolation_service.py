@@ -33,7 +33,7 @@ class BrowserIsolationService:
 
     def __init__(self, base_url: Optional[str] = None):
         self.base_url = (base_url or settings.GATEWAY_BROWSER_ISOLATION_URL).rstrip("/")
-        self.auth_token = settings.GATEWAY_AUTH_TOKEN
+        self.auth_token = settings.GATEWAY_AUTH_TOKEN.get_secret_value()
         # In-memory session registry for unit tests or mock mode
         self._mock_sessions: Dict[str, Dict[str, Any]] = {}
 

@@ -17,14 +17,16 @@ The SecurePAM Browser Isolation Daemon provides container-level sandboxing for w
 2. **Strict Destination Locking:** Chromium starts in kiosk mode pointing strictly to the server-side authorized application URL; the user has no URL bar, navigation bar, or capability to navigate to arbitrary external sites.
 3. **Multi-Session Profile Isolation:** Each session receives a distinct Chromium profile and cache directory (`/tmp/browser_sessions/{session_id}`). Cookies, localStorage, credentials, and cache are strictly isolated between concurrent sessions.
 4. **WebSocket noVNC Streaming:** Streams display updates to the user's browser via x11vnc and websockify.
+   **Status: not yet wired end to end.** x11vnc and websockify start per session, but NGINX does not proxy the websockify stream, so the viewer page only reports that the isolated browser is running. (It previously embedded the internal target URL in an iframe, which loaded the application in the user's own browser; that was removed.)
 5. **Frame-by-Frame Screen Recording:** Records display activity via FFmpeg and synchronizes video metadata with Member 12's `recordings` subsystem.
 
 ```
 Client Browser
       │
       ▼
-NGINX Gateway (/gw/apps/{app_id}/vnc/?session_id={session_id})
-      │ (auth_request validates active session + JIT grant)
+NGINX Gateway (/gw/apps/{app_id}/vnc/, securepam_gw cookie)
+      │ (auth_request validates the credential, session + JIT grant;
+      │  NGINX passes the authorized session ID on to the daemon)
       ▼
 Browser Isolation Daemon (Port 6080)
       │
@@ -74,7 +76,7 @@ All management endpoints require the header `X-Gateway-Auth-Token: <token>` (or 
     "status": "RUNNING",
     "session_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
     "display": ":100",
-    "vnc_path": "/gw/apps/f47ac10b-58cc-4372-a567-0e02b2c3d479/vnc/?session_id=c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c"
+    "vnc_path": "/gw/apps/f47ac10b-58cc-4372-a567-0e02b2c3d479/vnc/"
   }
   ```
 

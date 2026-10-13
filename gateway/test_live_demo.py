@@ -33,7 +33,7 @@ from app.core.security import create_dev_access_token, generate_request_number
 GATEWAY_HOST_URL = "http://127.0.0.1:7000"
 GATEWAY_DOCKER_URL = "http://nginx-gateway:7000"
 BACKEND_LOCAL_URL = "http://127.0.0.1:8000"
-AUTH_TOKEN = os.environ.get("GATEWAY_AUTH_TOKEN", "dev-insecure-change-me-in-production")
+AUTH_TOKEN = os.environ["GATEWAY_AUTH_TOKEN"]  # required, as for the gateway containers
 
 
 async def run_live_demo_verification():
@@ -166,16 +166,23 @@ async def run_live_demo_verification():
     # ------------------------------------------------------------------
     print("\n[Step 5] Accessing noVNC URL through NGINX gateway...")
     async with httpx.AsyncClient() as client:
-        # Access through NGINX internal or public URL
-        nginx_vnc_url = f"{GATEWAY_DOCKER_URL}/gw/apps/{app_id}/vnc/?session_id={session_id}"
-        vnc_resp = await client.get(nginx_vnc_url)
+        # Redeem the single-use launch ticket for the credential cookie. The cookie
+        # is sent explicitly because this script talks plain HTTP inside the Docker
+        # network, where an HTTP client will not send a Secure cookie.
+        launch = await client.get(f"{GATEWAY_DOCKER_URL}{session_data['launch_url']}")
+        assert launch.status_code == 303, f"Launch failed: {launch.status_code}"
+        gw_cookie = {"Cookie": f"securepam_gw={launch.cookies['securepam_gw']}"}
+        replay = await client.get(f"{GATEWAY_DOCKER_URL}{session_data['launch_url']}")
+        assert replay.status_code == 403, f"Launch ticket reused: {replay.status_code}"
+
+        vnc_resp = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{app_id}/vnc/", headers=gw_cookie)
         assert vnc_resp.status_code == 200, f"NGINX VNC access failed: {vnc_resp.status_code}"
         html_body = vnc_resp.text
         assert "SecurePAM Browser Isolation" in html_body
-        assert f"http://backend:8000" in html_body
+        assert "http://backend:8000" not in html_body  # internal target never reaches the browser
         assert "ISOLATED PROCESS" in html_body
         print(f"  ✅ NGINX successfully routed to isolated browser UI: HTTP {vnc_resp.status_code} OK")
-        print(f"  ✅ Verified HTML contains session banner, isolation badge, and sandboxed iframe")
+        print(f"  ✅ Launch ticket is single-use; page does not disclose the internal target")
         results["vnc_access_via_nginx"] = "PASS"
 
     # ------------------------------------------------------------------
@@ -183,15 +190,17 @@ async def run_live_demo_verification():
     # ------------------------------------------------------------------
     print("\n[Step 6] Testing security authorization denial scenarios...")
     async with httpx.AsyncClient() as client:
-        # 6a. Invalid session UUID
-        fake_session = "00000000-0000-0000-0000-000000000000"
-        resp_invalid = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{app_id}/vnc/?session_id={fake_session}")
-        assert resp_invalid.status_code == 403, f"Expected 403 for invalid session, got {resp_invalid.status_code}"
-        print(f"  ✅ 6a. Invalid session denied: HTTP {resp_invalid.status_code} Forbidden")
+        # 6a. A bare session ID (query string or forged cookie) grants nothing
+        resp_invalid = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{app_id}/vnc/?session_id={session_id}")
+        assert resp_invalid.status_code == 403, f"Expected 403 for bare session ID, got {resp_invalid.status_code}"
+        forged = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{app_id}/vnc/",
+                                  headers={"Cookie": f"securepam_gw={session_id}.forged"})
+        assert forged.status_code == 403, f"Expected 403 for forged credential, got {forged.status_code}"
+        print(f"  ✅ 6a. Bare session ID and forged credential denied: HTTP 403 Forbidden")
 
-        # 6b. Mismatched application UUID
+        # 6b. Credential presented for another application
         other_app_id = uuid4()
-        resp_mismatch = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{other_app_id}/vnc/?session_id={session_id}")
+        resp_mismatch = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{other_app_id}/vnc/", headers=gw_cookie)
         assert resp_mismatch.status_code == 403, f"Expected 403 for app mismatch, got {resp_mismatch.status_code}"
         print(f"  ✅ 6b. Mismatched application denied: HTTP {resp_mismatch.status_code} Forbidden")
 
@@ -229,7 +238,7 @@ async def run_live_demo_verification():
         print(f"  ✅ Daemon purged session: HTTP 404 Not Found")
 
         # Verify subsequent access through NGINX is blocked
-        blocked_resp = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{app_id}/vnc/?session_id={session_id}")
+        blocked_resp = await client.get(f"{GATEWAY_DOCKER_URL}/gw/apps/{app_id}/vnc/", headers=gw_cookie)
         assert blocked_resp.status_code == 403, f"Expected 403 blocked access, got {blocked_resp.status_code}"
         print(f"  ✅ Subsequent NGINX access blocked: HTTP 403 Forbidden")
         results["session_termination_and_cleanup"] = "PASS"

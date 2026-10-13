@@ -283,6 +283,20 @@ async def test_checkout_application_denies_ambiguous_vault_refs(db_session: Asyn
     assert exc.value.reason == "AMBIGUOUS_CREDENTIAL_REFERENCE"
 
 
+async def _gateway_auth(db: AsyncSession, session, monkeypatch) -> str:
+    """Configure a gateway token and give the session a launch-issued credential."""
+    from pydantic import SecretStr
+    from app.api.v1.gateway import _new_credential
+
+    token = "g" * 48
+    monkeypatch.setattr(settings, "GATEWAY_AUTH_TOKEN", SecretStr(token))
+    credential, credential_hash = _new_credential(session.id)
+    session.metadata_ = {**(session.metadata_ or {}), "gateway_credential_hash": credential_hash,
+                         "test_credential": credential}
+    await db.commit()
+    return token
+
+
 @pytest.mark.asyncio
 async def test_gateway_auth_hook_injects_basic_auth_header(
     client: AsyncClient, db_session: AsyncSession, app_setup, monkeypatch
@@ -306,8 +320,8 @@ async def test_gateway_auth_hook_injects_basic_auth_header(
     monkeypatch.setattr("app.services.credential_service.get_secret_provider", lambda: mock_provider)
 
     headers = {
-        "X-Gateway-Auth-Token": settings.GATEWAY_AUTH_TOKEN,
-        "X-SecurePAM-Session-ID": str(session.id),
+        "X-Gateway-Auth-Token": await _gateway_auth(db_session, session, monkeypatch),
+        "X-SecurePAM-Gateway-Credential": session.metadata_["test_credential"],
         "X-SecurePAM-App-ID": str(app.id),
     }
 
@@ -348,8 +362,8 @@ async def test_gateway_auth_hook_injects_bearer_auth_header(
     monkeypatch.setattr("app.services.credential_service.get_secret_provider", lambda: mock_provider)
 
     headers = {
-        "X-Gateway-Auth-Token": settings.GATEWAY_AUTH_TOKEN,
-        "X-SecurePAM-Session-ID": str(session.id),
+        "X-Gateway-Auth-Token": await _gateway_auth(db_session, session, monkeypatch),
+        "X-SecurePAM-Gateway-Credential": session.metadata_["test_credential"],
         "X-SecurePAM-App-ID": str(app.id),
     }
 
@@ -362,15 +376,15 @@ async def test_gateway_auth_hook_injects_bearer_auth_header(
 
 @pytest.mark.asyncio
 async def test_gateway_auth_hook_no_vault_ref_leaves_header_unset(
-    client: AsyncClient, db_session: AsyncSession, app_setup
+    client: AsyncClient, db_session: AsyncSession, app_setup, monkeypatch
 ):
     """When an application has no VaultRef, no Authorization header is injected."""
     app = app_setup["app"]
     session = app_setup["session"]
 
     headers = {
-        "X-Gateway-Auth-Token": settings.GATEWAY_AUTH_TOKEN,
-        "X-SecurePAM-Session-ID": str(session.id),
+        "X-Gateway-Auth-Token": await _gateway_auth(db_session, session, monkeypatch),
+        "X-SecurePAM-Gateway-Credential": session.metadata_["test_credential"],
         "X-SecurePAM-App-ID": str(app.id),
     }
 

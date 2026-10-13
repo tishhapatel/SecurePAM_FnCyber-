@@ -123,9 +123,14 @@ class Settings(BaseSettings):
     # Pre-shared secret sent by NGINX in X-Gateway-Auth-Token on every
     # auth_request sub-request.  The /gateway/internal/auth endpoint
     # validates this header so the endpoint is not publicly exploitable.
-    # Must be set in .env (min 32 chars); never hard-coded.
+    # Must be set in .env (min 32 chars); never hard-coded. There is no
+    # default: while it is unset or weak the endpoint rejects every call.
     # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
-    GATEWAY_AUTH_TOKEN: str = "dev-insecure-change-me-in-production"
+    GATEWAY_AUTH_TOKEN: SecretStr = SecretStr("")
+    # Secure flag on the gateway credential cookie. Browsers accept Secure
+    # cookies on http://localhost, so only disable this for other plain-HTTP
+    # lab hosts; it cannot be disabled in production.
+    GATEWAY_COOKIE_SECURE: bool = True
 
     # --- Gateway Config Manager ---
     # Directory where NGINX upstream config snippets are written.
@@ -194,15 +199,19 @@ class Settings(BaseSettings):
             self.SECRET_KEY == _PLACEHOLDER_SECRET_KEY or len(self.SECRET_KEY) < _MIN_SECRET_KEY_LENGTH
         ):
             errors.append(f"SECRET_KEY must be changed and at least {_MIN_SECRET_KEY_LENGTH} characters when ENVIRONMENT=production")
-        if production and "GATEWAY_AUTH_TOKEN" in self.model_fields_set:
-            if (
-                self.GATEWAY_AUTH_TOKEN == _PLACEHOLDER_GATEWAY_TOKEN
-                or len(self.GATEWAY_AUTH_TOKEN) < _MIN_GATEWAY_TOKEN_LENGTH
-            ):
-                errors.append(
-                    f"GATEWAY_AUTH_TOKEN must be changed from default and at least {_MIN_GATEWAY_TOKEN_LENGTH} characters when ENVIRONMENT=production"
-                )
-
+        # An unset GATEWAY_AUTH_TOKEN is allowed (the gateway is optional and the
+        # auth hook then rejects everything); a set one must not be the old
+        # placeholder or short in production.
+        gateway_token = self.GATEWAY_AUTH_TOKEN.get_secret_value()
+        if production and gateway_token and (
+            gateway_token == _PLACEHOLDER_GATEWAY_TOKEN
+            or len(gateway_token) < _MIN_GATEWAY_TOKEN_LENGTH
+        ):
+            errors.append(
+                f"GATEWAY_AUTH_TOKEN must be changed from default and at least {_MIN_GATEWAY_TOKEN_LENGTH} characters when ENVIRONMENT=production"
+            )
+        if production and not self.GATEWAY_COOKIE_SECURE:
+            errors.append("GATEWAY_COOKIE_SECURE=false is not allowed when ENVIRONMENT=production")
 
         if self.SECRET_PROVIDER == "mock":
             if production:

@@ -9,7 +9,24 @@ set -e
 export GATEWAY_BACKEND_HOST="${GATEWAY_BACKEND_HOST:-backend}"
 export GATEWAY_BACKEND_PORT="${GATEWAY_BACKEND_PORT:-8000}"
 export GATEWAY_TEST_UPSTREAM="${GATEWAY_TEST_UPSTREAM:-backend:8000}"
-export GATEWAY_AUTH_TOKEN="${GATEWAY_AUTH_TOKEN:-dev-insecure-change-me-in-production}"
+# No default: refuse to start with an unset, short or placeholder token,
+# which the backend would reject anyway.
+case "${GATEWAY_AUTH_TOKEN:-}" in
+  ""|dev-insecure-change-me-in-production)
+    echo "[entrypoint] GATEWAY_AUTH_TOKEN must be set (at least 32 characters)." >&2
+    exit 1 ;;
+esac
+if [ "${#GATEWAY_AUTH_TOKEN}" -lt 32 ]; then
+  echo "[entrypoint] GATEWAY_AUTH_TOKEN must be at least 32 characters." >&2
+  exit 1
+fi
+case "$GATEWAY_AUTH_TOKEN" in
+  *[!A-Za-z0-9_-]*)
+    # It is substituted into a quoted nginx directive.
+    echo "[entrypoint] GATEWAY_AUTH_TOKEN may contain only A-Z a-z 0-9 _ -" >&2
+    exit 1 ;;
+esac
+export GATEWAY_AUTH_TOKEN
 export GATEWAY_BROWSER_ISOLATION_HOST="${GATEWAY_BROWSER_ISOLATION_HOST:-browser-isolation}"
 export GATEWAY_BROWSER_ISOLATION_PORT="${GATEWAY_BROWSER_ISOLATION_PORT:-6080}"
 
