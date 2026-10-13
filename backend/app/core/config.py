@@ -24,6 +24,11 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$")
 
 
+_DEV_MODE_ENVIRONMENTS = {"development", "test"}
+_PLACEHOLDER_SECRET_KEY = "change-this-to-a-secure-random-string-in-production"
+_MIN_SECRET_KEY_LENGTH = 32
+
+
 class SettingsError(Exception):
     """Invalid configuration. Deliberately NOT a ValueError: pydantic wraps
     ValueErrors in a ValidationError whose message embeds the raw input
@@ -41,7 +46,7 @@ class Settings(BaseSettings):
     DEV_MODE: bool = True
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
-    SECRET_KEY: str = "change-this-to-a-secure-random-string-in-production"
+    SECRET_KEY: str = _PLACEHOLDER_SECRET_KEY
 
     # --- Backend ---
     BACKEND_HOST: str = "0.0.0.0"
@@ -148,22 +153,26 @@ class Settings(BaseSettings):
     def KEYCLOAK_AUTH_URL(self) -> str:
         return f"{self.KEYCLOAK_ISSUER_URL}/protocol/openid-connect/auth"
 
-    @field_validator("SECRET_KEY")
-    @classmethod
-    def secret_key_must_be_changed(cls, v: str, info) -> str:
-        # In production, enforce a real secret key
-        return v
-
     @field_validator("SECRET_PROVIDER", mode="before")
     @classmethod
     def normalize_secret_provider(cls, v):
         return v.strip().lower() if isinstance(v, str) else v
 
     @model_validator(mode="after")
-    def validate_secret_provider(self) -> "Settings":
+    def validate_security_settings(self) -> "Settings":
         # Messages name the offending setting but never echo a token value.
         errors: List[str] = []
         production = self.ENVIRONMENT.lower() == "production"
+
+        # DEV_MODE enables /auth/login, the DevAuth HS256 validator and the
+        # seeded admin123/operator123 accounts. Outside local development
+        # or the test suite that is an authentication bypass, so refuse it.
+        if self.DEV_MODE and self.ENVIRONMENT.lower() not in _DEV_MODE_ENVIRONMENTS:
+            errors.append("DEV_MODE=true is only allowed when ENVIRONMENT is development or test")
+        if production and (
+            self.SECRET_KEY == _PLACEHOLDER_SECRET_KEY or len(self.SECRET_KEY) < _MIN_SECRET_KEY_LENGTH
+        ):
+            errors.append(f"SECRET_KEY must be changed and at least {_MIN_SECRET_KEY_LENGTH} characters when ENVIRONMENT=production")
 
         if self.SECRET_PROVIDER == "mock":
             if production:

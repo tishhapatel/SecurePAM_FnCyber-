@@ -159,3 +159,44 @@ def test_jwks_outage_is_not_misreported_as_invalid_token(oidc_setup):
 
     with pytest.raises(OIDCProviderUnavailableError):
         OIDCTokenValidator().validate(token)
+
+
+def _forge(header: dict, claims: dict, key: bytes | None) -> str:
+    """Hand-build a JWT so the library can't refuse to create the attack token."""
+    import base64
+    import hashlib
+    import hmac
+    import json
+
+    b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+    signing_input = f"{b64(json.dumps(header).encode())}.{b64(json.dumps(claims).encode())}"
+    sig = b64(hmac.new(key, signing_input.encode(), hashlib.sha256).digest()) if key else ""
+    return f"{signing_input}.{sig}"
+
+
+@pytest.mark.parametrize("encoding", ["DER", "PEM"])
+def test_hs256_key_confusion_with_public_key_is_rejected(oidc_setup, encoding):
+    """CVE-2024-33663 / CVE-2026-85394 class: an attacker who knows the IdP's
+    public key HMAC-signs a token with it. The validator must never accept
+    a non-RS256 algorithm, whatever key material the token implies."""
+    trusted_private, _, _ = oidc_setup
+    public_key = trusted_private.public_key()
+    key_bytes = (
+        public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        if encoding == "DER"
+        else public_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    )
+    now = int(time.time())
+    claims = {"sub": "attacker", "iss": settings.KEYCLOAK_ISSUER_URL, "aud": settings.KEYCLOAK_CLIENT_ID,
+              "iat": now, "exp": now + 300}
+    token = _forge({"alg": "HS256", "typ": "JWT", "kid": "trusted-key"}, claims, key_bytes)
+    with pytest.raises(InvalidTokenError):
+        OIDCTokenValidator().validate(token)
+
+
+def test_alg_none_is_rejected(oidc_setup):
+    now = int(time.time())
+    claims = {"sub": "attacker", "iss": settings.KEYCLOAK_ISSUER_URL, "aud": settings.KEYCLOAK_CLIENT_ID,
+              "iat": now, "exp": now + 300}
+    with pytest.raises(InvalidTokenError):
+        OIDCTokenValidator().validate(_forge({"alg": "none", "kid": "trusted-key"}, claims, None))

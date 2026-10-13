@@ -19,9 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.deps import get_db
+from app.core.logging import get_logger
 from app.schemas.common import DetailedHealthCheck, HealthCheck, LivenessCheck, ReadinessCheck, ServiceHealth
 
 router = APIRouter(tags=["health"])
+logger = get_logger(__name__)
 
 
 @router.get("/health", response_model=HealthCheck)
@@ -110,6 +112,14 @@ async def detailed_health_check(db: AsyncSession = Depends(get_db)):
     )
 
 
+def _log_unhealthy(service: str, exc: Exception) -> str:
+    """Health endpoints are unauthenticated: log the real error server-side
+    and return only a generic message (exception text can carry hostnames,
+    usernames or driver internals)."""
+    logger.warning("health_check_failed", service=service, error_type=type(exc).__name__, exc_info=True)
+    return f"{service} unreachable"
+
+
 async def _check_database(db: AsyncSession) -> ServiceHealth:
     """Check PostgreSQL connectivity."""
     try:
@@ -125,7 +135,7 @@ async def _check_database(db: AsyncSession) -> ServiceHealth:
         return ServiceHealth(
             service="database",
             status="unhealthy",
-            details=str(e),
+            details=_log_unhealthy("database", e),
         )
 
 
@@ -148,7 +158,7 @@ async def _check_redis() -> ServiceHealth:
         return ServiceHealth(
             service="redis",
             status="unhealthy",
-            details=str(e),
+            details=_log_unhealthy("redis", e),
         )
 
 

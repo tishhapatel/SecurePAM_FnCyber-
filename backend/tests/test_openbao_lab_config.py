@@ -13,7 +13,7 @@ from app.core.config import BACKEND_DIR, Settings, SettingsError
 from app.secret_providers.paths import validate_secret_path
 
 REPO = BACKEND_DIR.parent
-POLICY = REPO / "infrastructure/openbao/policies/securepam-runtime.hcl"
+POLICY = REPO / "infrastructure/openbao/policies/securepam-read.hcl"
 INIT = REPO / "infrastructure/openbao/init-lab.sh"
 CANARY = "s.FILETOKENCANARY0123456789"
 
@@ -93,9 +93,14 @@ def test_runtime_policy_matches_backend_path_rules():
 
 
 def test_lab_sample_secret_is_at_a_path_the_backend_accepts():
-    m = re.search(r'bao kv put "secret/\$\{SECRET_PREFIX\}/(assets/[a-z0-9-]+)"', INIT.read_text())
+    m = re.search(r'bao kv put secret/(securepam/assets/[a-z0-9-]+)', INIT.read_text())
     assert m, "init-lab.sh no longer writes the sample under <prefix>/assets/"
-    validate_secret_path(f"securepam/{m.group(1)}", "securepam")
+    validate_secret_path(m.group(1), "securepam")
+
+
+def test_init_script_does_not_overwrite_existing_sample():
+    script = INIT.read_text()
+    assert script.index("bao kv get secret/securepam/assets/") < script.index("bao kv put secret/securepam/assets/")
 
 
 def test_init_script_never_prints_the_token():

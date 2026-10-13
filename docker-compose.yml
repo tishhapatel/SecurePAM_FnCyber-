@@ -75,23 +75,28 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-securepam}:${POSTGRES_PASSWORD:-securepam_dev_password}@postgres:5432/${POSTGRES_DB:-securepam}
       - REDIS_URL=redis://redis:6379/0
+      - OPENBAO_ADDR=http://openbao:8200
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend:/app
       - recording_data:/data/recordings
-      # Lab: least-privilege token written by openbao-init. Use with
-      # SECRET_PROVIDER=openbao, OPENBAO_ADDR=http://openbao:8200,
-      # OPENBAO_TOKEN_FILE=/openbao/runtime/app-token.
-      - openbao_runtime:/openbao/runtime:ro
+      - openbao_runtime:/run/openbao:ro
+    command:
+      - sh
+      - -c
+      - |
+        if [ -s /run/openbao/app-token ]; then
+          export OPENBAO_TOKEN_FILE=/run/openbao/app-token
+          export SECRET_PROVIDER=openbao
+          export OPENBAO_ADDR=http://openbao:8200
+        fi
+        alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      openbao-init:
-        condition: service_completed_successfully
-        required: false  # only present with --profile lab
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -213,6 +218,7 @@ services:
       - ./infrastructure/openbao/policies:/openbao/policies:ro
       - ./infrastructure/openbao/init-lab.sh:/openbao/init-lab.sh:ro
       - openbao_runtime:/openbao/runtime
+    user: "0:0"
     entrypoint: ["/bin/sh", "/openbao/init-lab.sh"]
     depends_on:
       openbao:
@@ -258,8 +264,8 @@ volumes:
   recording_data:
   prometheus_data:
   grafana_data:
-  keycloak_postgres_data:
   openbao_runtime:
+  keycloak_postgres_data:
 
 networks:
   securepam-net:

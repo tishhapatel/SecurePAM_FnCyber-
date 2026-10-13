@@ -81,7 +81,8 @@ def test_production_refuses_mock_provider():
 def test_production_requires_https():
     with pytest.raises(SettingsError, match="must use https"):
         make(**VALID, ENVIRONMENT="production")
-    assert make(**{**VALID, "OPENBAO_ADDR": "https://bao.internal:8200"}, ENVIRONMENT="production")
+    assert make(**{**VALID, "OPENBAO_ADDR": "https://bao.internal:8200"}, ENVIRONMENT="production",
+                DEV_MODE=False, SECRET_KEY="k" * 48)
 
 
 @pytest.mark.parametrize(

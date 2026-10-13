@@ -7,10 +7,6 @@ set -eu
 
 BAO_ADDR="${BAO_ADDR:-http://openbao:8200}"
 export BAO_ADDR
-POLICY_DIR="${POLICY_DIR:-/openbao/policies}"
-RUNTIME_DIR="${RUNTIME_DIR:-/openbao/runtime}"
-# Must match the backend's OPENBAO_SECRET_PATH_PREFIX.
-SECRET_PREFIX="${SECRET_PREFIX:-securepam}"
 
 if [ -z "${BAO_TOKEN:-}" ]; then
   echo "BAO_TOKEN is empty. Set OPENBAO_DEV_ROOT_TOKEN_ID for the lab bootstrap." >&2
@@ -34,29 +30,36 @@ else
   bao secrets enable -path=secret kv-v2
 fi
 
-bao policy write securepam-runtime "${POLICY_DIR}/securepam-runtime.hcl"
+bao policy write securepam-read /openbao/policies/securepam-read.hcl
 
-# Synthetic credential at the path convention the backend reads
-# (<prefix>/assets/<name>). This is not a real credential.
-bao kv put "secret/${SECRET_PREFIX}/assets/lab-sample" \
-  username="lab-operator" \
-  password="lab-only-not-a-real-credential" \
-  >/dev/null
+# Synthetic path matching CredentialService's server-derived convention.
+# This is not a real credential. Written only once, so a rerun never
+# overwrites a value someone has since put at this path.
+if bao kv get secret/securepam/assets/test-linux-01 >/dev/null 2>&1; then
+  echo "Sample secret already present; left unchanged."
+else
+  bao kv put secret/securepam/assets/test-linux-01 \
+    username="fakeuser" \
+    password="fake-only" \
+    >/dev/null
+fi
 
+mkdir -p /openbao/runtime
+chmod 711 /openbao/runtime
 umask 077
-tmp="${RUNTIME_DIR}/app-token.tmp"
+tmp=/openbao/runtime/app-token.tmp
 bao token create \
-  -policy=securepam-runtime \
+  -policy=securepam-read \
   -no-default-policy \
   -orphan \
-  -ttl=768h \
-  -display-name=securepam-lab \
+  -ttl=24h \
+  -display-name=securepam-backend \
   -field=token \
   > "$tmp"
-# The backend container runs as a non-root user with a different UID, so the
-# file must be readable by it. The volume is mounted only into openbao-init
-# (rw) and backend (ro). Lab only — production uses a real auth method.
-chmod 0444 "$tmp"
-mv "$tmp" "${RUNTIME_DIR}/app-token"
+# Lab volume only. The directory is traversable and the file is world-readable
+# so the non-root backend user can load the token. The volume is not a host directory.
+chmod 444 "$tmp"
+# Atomic replace: the backend never reads a partially written token.
+mv "$tmp" /openbao/runtime/app-token
 
 echo "OpenBao lab configuration applied. Runtime token stored in the openbao_runtime volume."

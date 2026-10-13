@@ -406,7 +406,6 @@ relative to `backend/`, regardless of the working directory):
 | `OPENBAO_ADDR` | — | `http(s)://host:port`, no path/credentials |
 | `OPENBAO_MOUNT_POINT` | `secret` | KV v2 mount |
 | `OPENBAO_TOKEN` | — | The **restricted** app token (below). Held as a `SecretStr`; never logged, echoed in errors, or sent to the health endpoint |
-| `OPENBAO_TOKEN_FILE` | — | Alternative to `OPENBAO_TOKEN`: a file holding the token, read once at startup (missing/unreadable/empty fails startup; setting both is refused) |
 | `OPENBAO_SECRET_PATH_PREFIX` | `securepam` | Every reference must sit under `<mount>/data/<prefix>/…` |
 | `OPENBAO_CONNECT_TIMEOUT_SECONDS` / `OPENBAO_REQUEST_TIMEOUT_SECONDS` | `3` / `5` | Separate connect/request timeouts |
 | `OPENBAO_CA_CERT` | empty | CA bundle path for TLS with a private CA |
@@ -439,6 +438,16 @@ same URL; all three are ADMIN-only with the seeded roles and audited
 (`CREDENTIAL_REF_SET` / `CREDENTIAL_REF_DEACTIVATED`).
 
 ### Local OpenBao development setup
+
+The lab Compose profile starts OpenBao and applies `securepam-read` for you:
+
+```bash
+docker compose --profile lab up openbao openbao-init
+```
+
+That writes the synthetic secret `secret/securepam/assets/test-linux-01` and a non-root token into the `openbao_runtime` volume. When the backend container sees that file, it sets `SECRET_PROVIDER=openbao` and `OPENBAO_TOKEN` from the file. Do not paste the dev root token into `OPENBAO_TOKEN`.
+
+To do the same steps by hand:
 
 ```bash
 bao server -dev                                    # terminal 1 — prints a ROOT token
@@ -503,6 +512,16 @@ The error text tells you which layer refused:
   does not follow redirects, ignores proxy/netrc environment, and raises
   exceptions without the HTTP cause chained in.
 - `backend/.dockerignore` keeps `backend/.env` out of built images.
+
+### Grant lifetime bounds session lifetime
+
+When a JIT grant is revoked or expires (`JITService.revoke`/`expire`, or the
+lazy flip inside `validate`), every live session bound to it is marked
+`EXPIRED`, its in-progress recording is finalized, and a
+`SESSION_ENDED_BY_GRANT` event is recorded. Expiry is still evaluated
+lazily (when something reads the grant) — a background sweep is future work,
+and the real gateway must tear down the connection when a session leaves a
+live state.
 
 ### Remaining production-hardening requirements
 
@@ -599,28 +618,8 @@ VITE_API_URL=http://localhost:8000 npm run dev -- --port 3000
 ```bash
 cp .env.example .env
 docker compose up --build        # postgres, redis, backend, frontend
-docker compose --profile lab up --build   # + keycloak, guacamole, openbao
+docker compose --profile lab up --build   # + keycloak, guacamole, vault (not yet integrated)
 ```
-
-The `lab` profile starts OpenBao (`openbao/openbao:2.7.1`) as an in-memory
-dev server on `127.0.0.1:8200` (loopback only — its root token is a known lab
-default). `openbao-init` enables KV v2 at `secret/`, writes the
-`securepam-runtime` policy (read-only on `secret/data/securepam/assets/*`,
-nothing else), stores one synthetic credential at
-`secret/securepam/assets/lab-sample`, and writes a non-root, no-default-policy
-token to the `openbao_runtime` volume. The backend mounts that volume
-read-only; to use it, set in `.env`:
-
-```bash
-SECRET_PROVIDER=openbao
-OPENBAO_ADDR=http://openbao:8200
-OPENBAO_TOKEN_FILE=/openbao/runtime/app-token
-```
-
-`OPENBAO_DEV_ROOT_TOKEN_ID` is only for the compose bootstrap — never put it
-in `OPENBAO_TOKEN`. The backend waits for `openbao-init` when the lab profile
-is active (`depends_on … required: false` needs Docker Compose v2.20.2+). The
-dev server keeps nothing across restarts and is not a production configuration.
 
 ## Migrations
 
@@ -665,10 +664,10 @@ placeholder values (no real secrets). Key ones for local dev:
 
 | Variable | Purpose |
 |---|---|
-| `DEV_MODE` | `true` enables local JWT login + auto-seeding; `false` requires Keycloak (not implemented yet — see `app/auth/oidc_provider.py`) |
+| `DEV_MODE` | `true` enables local JWT login, the DevAuth validator and seeded known-password accounts; startup refuses it unless `ENVIRONMENT` is `development` or `test`. `false` uses Keycloak OIDC (`app/auth/oidc_provider.py`) |
 | `DATABASE_URL` | Must keep the `+asyncpg` driver suffix |
 | `REDIS_URL` | Used by `/health/ready` and (later) JIT TTL enforcement |
-| `SECRET_KEY` | Signs DevAuth JWTs — change in any non-local environment |
+| `SECRET_KEY` | Signs DevAuth JWTs. Startup refuses the placeholder (or anything under 32 characters) when `ENVIRONMENT=production` |
 | `LOG_LEVEL`, `DEBUG` | `DEBUG=true` also raises the `sqlalchemy.engine` logger to INFO |
 | `BACKEND_CORS_ORIGINS` | Must include whatever origin the frontend is actually served from |
 | `SECRET_PROVIDER`, `OPENBAO_*` | Credential provider — see [Credential management (OpenBao)](#credential-management-openbao) |
@@ -751,7 +750,7 @@ Phase 5 adds OpenBao KV v2 credential references and `CredentialService`
 (authorized, audited, backend-only retrieval for future gateways) — see
 [Credential management (OpenBao)](#credential-management-openbao).
 
-Not implemented: OpenBao rotation/dynamic secrets, the real Guacamole (RDP) handoff, SSH
+Not implemented: Keycloak/OIDC, OpenBao rotation/dynamic secrets, Guacamole (RDP), SSH
 gateway, web reverse proxy, isolated browser, session recording,
 Wazuh/SIEM, Users/Roles CRUD, a JIT REST endpoint (deliberately — see
 the JIT lifecycle section above), and a background sweep for
