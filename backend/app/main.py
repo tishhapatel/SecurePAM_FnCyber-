@@ -23,6 +23,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.v1.gateway import gateway_token_matches
 from app.api.v1.health import router as health_router
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -152,7 +153,18 @@ async def request_context_middleware(request: Request, call_next):
             and request.method == "POST"
         )
 
-        if is_api_request and settings.ENVIRONMENT != "test":
+        # NGINX calls the gateway auth hook once per proxied request, all from
+        # its own address, so a per-client bucket would throttle every gateway
+        # user together. Only that exact callback, and only when it carries the
+        # valid GATEWAY_AUTH_TOKEN, skips the limiter; anything else on the
+        # path (and the public launch route) is limited as usual.
+        is_gateway_auth_callback = (
+            request.url.path == f"{api_prefix}/gateway/internal/auth"
+            and request.method == "GET"
+            and gateway_token_matches(request.headers.get("X-Gateway-Auth-Token"))
+        )
+
+        if is_api_request and not is_gateway_auth_callback and settings.ENVIRONMENT != "test":
             limiter = getattr(request.app.state, "rate_limiter", None)
 
             if limiter is None:

@@ -640,6 +640,20 @@ async def _enforce_jit(
 # ---------------------------------------------------------------------------
 
 
+def gateway_token_configured() -> bool:
+    """True only for a GATEWAY_AUTH_TOKEN that is set, long enough and not the placeholder."""
+    expected = settings.GATEWAY_AUTH_TOKEN.get_secret_value()
+    return len(expected) >= _MIN_GATEWAY_TOKEN_LENGTH and expected != _PLACEHOLDER_GATEWAY_TOKEN
+
+
+def gateway_token_matches(presented: Optional[str]) -> bool:
+    """Constant-time check of a presented token; always False while unconfigured."""
+    if presented is None or not gateway_token_configured():
+        return False
+    expected = settings.GATEWAY_AUTH_TOKEN.get_secret_value()
+    return secrets.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
+
+
 def _validate_gateway_auth_token(
     x_gateway_auth_token: Optional[str] = Header(None, alias="X-Gateway-Auth-Token"),
 ) -> None:
@@ -649,21 +663,14 @@ def _validate_gateway_auth_token(
     Fails closed: when the configured token is empty, the old placeholder or
     shorter than _MIN_GATEWAY_TOKEN_LENGTH, every call is rejected, so a
     deployment that forgot to set it cannot be called with a guessable value.
-    Uses secrets.compare_digest to prevent timing attacks.
     """
-    expected = settings.GATEWAY_AUTH_TOKEN.get_secret_value()
-    if (
-        len(expected) < _MIN_GATEWAY_TOKEN_LENGTH
-        or expected == _PLACEHOLDER_GATEWAY_TOKEN
-    ):
+    if not gateway_token_configured():
         logger.error("GATEWAY_AUTH_TOKEN is unset or too weak; rejecting gateway auth request")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Gateway authentication is not configured.",
         )
-    if x_gateway_auth_token is None or not secrets.compare_digest(
-        x_gateway_auth_token.encode("utf-8"), expected.encode("utf-8")
-    ):
+    if not gateway_token_matches(x_gateway_auth_token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid gateway auth token.",
