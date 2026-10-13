@@ -220,6 +220,14 @@ over-long `requested_duration` is **clamped** to `max_session_duration`,
 never rejected — the spec's own example: requested 120 minutes, policy
 maximum 30 minutes → the grant is 30 minutes, not an error.
 
+**Standalone policy engine (`policy-engine/`, not yet wired in).** A
+separate, versioned, risk-adaptive evaluator with its own tests lives in
+[`policy-engine/`](policy-engine/README.md). The backend still uses
+`app/policies/evaluator.py`; adopting the module means replacing that
+evaluator inside `AccessDecisionService`, not running both. Its store uses
+the `policy_engine_policies` table, so it does not touch the backend's
+`policies` table.
+
 ### Risk scoring
 
 `app/risk/engine.py` — deterministic, explainable, **not** machine
