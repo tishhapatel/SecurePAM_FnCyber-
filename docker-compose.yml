@@ -87,7 +87,7 @@ services:
       - -c
       - |
         if [ -s /run/openbao/app-token ]; then
-          export OPENBAO_TOKEN="$$(cat /run/openbao/app-token)"
+          export OPENBAO_TOKEN_FILE=/run/openbao/app-token
           export SECRET_PROVIDER=openbao
           export OPENBAO_ADDR=http://openbao:8200
         fi
@@ -194,7 +194,8 @@ services:
     cap_add:
       - IPC_LOCK
     ports:
-      - "8200:8200"
+      # Loopback only: the dev server's root token is a known lab default.
+      - "127.0.0.1:8200:8200"
     healthcheck:
       test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
       interval: 5s

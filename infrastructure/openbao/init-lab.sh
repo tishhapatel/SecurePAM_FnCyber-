@@ -33,15 +33,21 @@ fi
 bao policy write securepam-read /openbao/policies/securepam-read.hcl
 
 # Synthetic path matching CredentialService's server-derived convention.
-# This is not a real credential.
-bao kv put secret/securepam/assets/test-linux-01 \
-  username="fakeuser" \
-  password="fake-only" \
-  >/dev/null
+# This is not a real credential. Written only once, so a rerun never
+# overwrites a value someone has since put at this path.
+if bao kv get secret/securepam/assets/test-linux-01 >/dev/null 2>&1; then
+  echo "Sample secret already present; left unchanged."
+else
+  bao kv put secret/securepam/assets/test-linux-01 \
+    username="fakeuser" \
+    password="fake-only" \
+    >/dev/null
+fi
 
 mkdir -p /openbao/runtime
 chmod 711 /openbao/runtime
 umask 077
+tmp=/openbao/runtime/app-token.tmp
 bao token create \
   -policy=securepam-read \
   -no-default-policy \
@@ -49,9 +55,11 @@ bao token create \
   -ttl=24h \
   -display-name=securepam-backend \
   -field=token \
-  > /openbao/runtime/app-token
+  > "$tmp"
 # Lab volume only. The directory is traversable and the file is world-readable
 # so the non-root backend user can load the token. The volume is not a host directory.
-chmod 444 /openbao/runtime/app-token
+chmod 444 "$tmp"
+# Atomic replace: the backend never reads a partially written token.
+mv "$tmp" /openbao/runtime/app-token
 
 echo "OpenBao lab configuration applied. Runtime token stored in the openbao_runtime volume."
