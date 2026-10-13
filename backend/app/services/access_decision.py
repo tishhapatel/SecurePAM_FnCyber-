@@ -29,6 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.config import settings
 from app.core.security import generate_request_number
 from app.models.access_request import AccessRequest
 from app.models.application import Application
@@ -38,7 +39,7 @@ from app.models.audit import RiskEvent
 from app.models.policy import Policy
 from app.models.user import User
 from app.policies import PolicyDecision, PolicyEvaluator
-from app.risk import RiskContext, RiskResult, evaluate_risk
+from app.risk import RiskConfiguration, RiskContext, RiskResult, evaluate_risk
 from app.services.jit_service import JITService
 
 # How long a request sits in the approval queue before it lapses on its
@@ -85,9 +86,10 @@ def _target_type(asset_id: Optional[UUID]) -> str:
 
 
 class AccessDecisionService:
-    def __init__(self):
+    def __init__(self, risk_configuration: Optional[RiskConfiguration] = None):
         self._policy_evaluator = PolicyEvaluator()
         self._jit = JITService()
+        self._risk_configuration = risk_configuration or RiskConfiguration.from_settings(settings)
 
     # --- target loading / validation ---
 
@@ -184,6 +186,7 @@ class AccessDecisionService:
         risk_result = evaluate_risk(
             user=requester, target=target, requested_duration=requested_duration,
             context=RiskContext(now=now, source_ip=source_ip, prior_request_count=prior_count),
+            configuration=self._risk_configuration,
         )
 
         final_status, decision_reasons = self._decide(policy_decision, risk_result)

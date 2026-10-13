@@ -121,6 +121,36 @@ class Settings(BaseSettings):
     JIT_DEFAULT_DURATION: int = 30  # minutes
     JIT_MAX_DURATION: int = 480  # minutes
 
+    # --- Risk Engine (project-specific scoring choices) ---
+    # Defaults equal app.risk.engine.RISK_WEIGHTS; RiskConfiguration validates
+    # them at startup (unknown factors, negative weights or misordered
+    # thresholds stop the app).
+    RISK_WEIGHT_PRODUCTION_ASSET: int = 30
+    RISK_WEIGHT_CRITICAL_ASSET: int = 25
+    RISK_WEIGHT_HIGH_CRITICALITY: int = 15
+    RISK_WEIGHT_SENSITIVE_APPLICATION: int = 20
+    RISK_WEIGHT_HIGH_PRIVILEGE_ROLE: int = 20
+    RISK_WEIGHT_OUTSIDE_BUSINESS_HOURS: int = 20
+    RISK_WEIGHT_UNKNOWN_CONTEXT: int = 20
+    RISK_WEIGHT_REPEATED_AUTH_FAILURE: int = 20
+    RISK_WEIGHT_UNUSUAL_ACCESS_PATTERN: int = 20
+    RISK_WEIGHT_LONG_DURATION: int = 10
+    RISK_ENABLE_PRODUCTION_ASSET: bool = True
+    RISK_ENABLE_CRITICAL_ASSET: bool = True
+    RISK_ENABLE_HIGH_CRITICALITY: bool = True
+    RISK_ENABLE_SENSITIVE_APPLICATION: bool = True
+    RISK_ENABLE_HIGH_PRIVILEGE_ROLE: bool = True
+    RISK_ENABLE_OUTSIDE_BUSINESS_HOURS: bool = True
+    RISK_ENABLE_UNKNOWN_CONTEXT: bool = True
+    RISK_ENABLE_REPEATED_AUTH_FAILURE: bool = True
+    RISK_ENABLE_UNUSUAL_ACCESS_PATTERN: bool = True
+    RISK_ENABLE_LONG_DURATION: bool = True
+    RISK_HIGH_PRIVILEGE_ROLES: List[str] = ["ADMIN"]
+    RISK_LONG_DURATION_THRESHOLD_MINUTES: int = 60
+    RISK_MEDIUM_THRESHOLD: int = 30
+    RISK_HIGH_THRESHOLD: int = 60
+    RISK_CRITICAL_THRESHOLD: int = 80
+
     # --- Gateway Auth Hook ---
     # Pre-shared secret sent by NGINX in X-Gateway-Auth-Token on every
     # auth_request sub-request.  The /gateway/internal/auth endpoint

@@ -7,13 +7,15 @@ time at test-run time.
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings
 from app.models.application import Application
 from app.models.asset import Asset
 from app.models.user import User
-from app.risk.engine import RiskContext, evaluate_risk
+from app.risk.engine import RISK_WEIGHTS, RiskConfiguration, RiskContext, evaluate_risk
 
 # Wednesday 12:00 UTC — inside business hours (09:00-17:00 UTC, Mon-Fri).
 BUSINESS_HOURS_NOW = datetime(2025, 1, 8, 12, 0, tzinfo=timezone.utc)
@@ -207,3 +209,42 @@ async def test_explainability_factors_sum_to_score(db_session: AsyncSession):
         assert factor.code
         assert factor.points > 0
         assert factor.reason  # every factor must be able to explain itself
+
+
+async def test_configured_weights_factor_switches_and_thresholds(db_session: AsyncSession):
+    operator = await _get(db_session, User, username="operator")
+    prod_asset = await _get(db_session, Asset, name="WIN-PROD-01")
+    configured_settings = Settings.model_construct(
+        RISK_WEIGHT_PRODUCTION_ASSET=12,
+        RISK_ENABLE_HIGH_CRITICALITY=False,
+        RISK_HIGH_PRIVILEGE_ROLES=["SECURITY_ADMIN"],
+        RISK_MEDIUM_THRESHOLD=10,
+        RISK_HIGH_THRESHOLD=25,
+        RISK_CRITICAL_THRESHOLD=40,
+    )
+    configuration = RiskConfiguration.from_settings(configured_settings)
+    assert RiskConfiguration.from_settings(Settings.model_construct()).weights == RISK_WEIGHTS
+
+    result = evaluate_risk(
+        user=operator,
+        target=prod_asset,
+        requested_duration=15,
+        context=RiskContext(now=BUSINESS_HOURS_NOW, source_ip="10.0.0.1", prior_request_count=5),
+        configuration=configuration,
+    )
+
+    assert [(factor.code, factor.points) for factor in result.factors] == [("PRODUCTION_ASSET", 12)]
+    assert result.score == 12
+    assert result.level == "MEDIUM"
+    assert configuration.high_privilege_roles == frozenset({"SECURITY_ADMIN"})
+    assert result.to_dict()["factors"][0]["reason"] == "Target environment is PRODUCTION"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"RISK_MEDIUM_THRESHOLD": 70, "RISK_HIGH_THRESHOLD": 60},
+    {"RISK_MEDIUM_THRESHOLD": 0},
+    {"RISK_WEIGHT_PRODUCTION_ASSET": -5},
+])
+def test_invalid_risk_settings_fail_closed(overrides):
+    with pytest.raises(ValueError):
+        RiskConfiguration.from_settings(Settings.model_construct(**overrides))

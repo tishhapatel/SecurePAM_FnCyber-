@@ -1,3 +1,3 @@
-from app.risk.engine import RiskContext, RiskFactor, RiskResult, evaluate_risk
+from app.risk.engine import RiskConfiguration, RiskContext, RiskFactor, RiskResult, evaluate_risk
 
-__all__ = ["evaluate_risk", "RiskContext", "RiskFactor", "RiskResult"]
+__all__ = ["evaluate_risk", "RiskConfiguration", "RiskContext", "RiskFactor", "RiskResult"]
