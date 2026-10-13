@@ -60,6 +60,9 @@ data/
 recordings/
 logs/
 *.log
+/keycloak-db.dump
+/keycloak-db-fixed.dump
+/keycloak-export/
 
 # --- Database ---
 *.sql.bak

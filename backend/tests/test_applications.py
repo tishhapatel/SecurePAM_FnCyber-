@@ -179,3 +179,14 @@ async def test_admin_can_delete_application(client: AsyncClient, admin_token: st
 
     get_after = await client.get(f"/api/v1/applications/{app_id}", headers=auth_header(admin_token))
     assert get_after.status_code == 404
+
+
+async def test_invalid_sort_order_returns_422(
+    client: AsyncClient, admin_token: str
+):
+    resp = await client.get(
+        "/api/v1/applications",
+        params={"sort_order": "invalid"},
+        headers=auth_header(admin_token),
+    )
+    assert resp.status_code == 422

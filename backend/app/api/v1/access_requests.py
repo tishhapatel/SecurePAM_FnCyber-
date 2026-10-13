@@ -41,14 +41,18 @@ _service = AccessDecisionService()
 def _permission_names(user: User) -> set[str]:
     perms: set[str] = set()
     for ur in user.roles:
-        if ur.role:
+        if ur.role and ur.role.is_active:
             for perm in ur.role.permissions:
                 perms.add(f"{perm.resource}:{perm.action}")
     return perms
 
 
 def _role_names(user: User) -> set[str]:
-    return {ur.role.name for ur in user.roles if ur.role}
+    return {
+        ur.role.name
+        for ur in user.roles
+        if ur.role and ur.role.is_active
+    }
 
 
 def _can_view_all(user: User) -> bool:

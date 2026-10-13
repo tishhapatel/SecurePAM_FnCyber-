@@ -3,7 +3,7 @@ Common Pydantic schemas used across the application.
 """
 
 from datetime import datetime
-from typing import Any, Generic, List, Optional, TypeVar
+from typing import Any, Generic, List, Literal, Optional, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -20,7 +20,7 @@ class PaginationParams(BaseModel):
     page: int = 1
     page_size: int = 25
     sort_by: Optional[str] = None
-    sort_order: str = "desc"
+    sort_order: Literal["asc", "desc"] = "desc"
 
 
 T = TypeVar("T")

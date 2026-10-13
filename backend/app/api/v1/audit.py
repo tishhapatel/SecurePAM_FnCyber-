@@ -9,18 +9,28 @@ PermissionChecker).
 
 import uuid
 from datetime import datetime
+
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
+from app.core.pagination import apply_sorting, paginate
+from app.schemas.common import PaginatedResponse, PaginationParams
 from app.core.deps import PermissionChecker, get_db
 from app.models.audit import AuditLog
 from app.models.user import User
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
-
+_SORTABLE_COLUMNS = {
+    "timestamp",
+    "action",
+    "severity",
+    "result",
+    "actor_username",
+    "target_type",
+}
 
 class AuditLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -37,20 +47,35 @@ class AuditLogResponse(BaseModel):
     details: Optional[dict]
 
 
-@router.get("/", response_model=List[AuditLogResponse])
+
+@router.get("/", response_model=PaginatedResponse[AuditLogResponse])
 async def get_audit_logs(
+    pagination: PaginationParams = Depends(),
     action: Optional[str] = Query(None, max_length=50),
     severity: Optional[str] = Query(None, max_length=10),
-    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(PermissionChecker("audit", "read")),
 ):
-    """Retrieve recent structured audit logs with optional filtering."""
-    query = select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit)
+    """Retrieve paginated audit logs with optional action and severity filters."""
+    query = select(AuditLog)
+
     if action:
         query = query.where(AuditLog.action == action.upper())
     if severity:
         query = query.where(AuditLog.severity == severity.upper())
 
-    result = await db.execute(query)
-    return result.scalars().all()
+    query = apply_sorting(
+        query,
+        AuditLog,
+        pagination.sort_by,
+        pagination.sort_order,
+        _SORTABLE_COLUMNS,
+    )
+
+    # Preserve newest-first ordering by default.
+    if not pagination.sort_by or pagination.sort_by not in _SORTABLE_COLUMNS:
+        query = query.order_by(AuditLog.timestamp.desc())
+
+    return await paginate(
+        db, query, pagination, schema=AuditLogResponse
+    )

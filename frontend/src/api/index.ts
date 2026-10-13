@@ -147,8 +147,10 @@ export const approvalsApi = {
 // --- Audit ---
 
 export const auditApi = {
-  list: (params?: Record<string, string | number>) =>
-    apiClient.get<AuditLog[]>('/audit', { params }).then(r => r.data),
+  list: (params?: ListParams) =>
+    apiClient
+      .get<PaginatedResponse<AuditLog>>('/audit', { params })
+      .then(r => r.data),
 };
 
 // --- Health ---
