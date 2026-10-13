@@ -63,8 +63,8 @@ class Session(Base, UUIDMixin, TimestampMixin):
     risk_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # References
-    request_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("access_requests.id"), nullable=False, index=True
+    request_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("access_requests.id"), nullable=True, index=True
     )
     jit_grant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("jit_grants.id", ondelete="SET NULL"), nullable=True

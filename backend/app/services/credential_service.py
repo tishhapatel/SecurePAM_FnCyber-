@@ -48,6 +48,7 @@ from app.core.audit import write_audit_log
 from app.core.config import settings
 from app.core.deps import user_has_permission
 from app.models.access_request import AccessRequest
+from app.models.application import Application
 from app.models.approval import Approval
 from app.models.asset import Asset
 from app.models.jit_grant import JITGrant
@@ -83,7 +84,8 @@ class CheckoutRequest:
     user_id: UUID
     access_request_id: UUID
     jit_grant_id: UUID
-    asset_id: UUID
+    asset_id: Optional[UUID] = None
+    application_id: Optional[UUID] = None
     session_id: Optional[UUID] = None
     source_ip: Optional[str] = None
 
@@ -130,10 +132,13 @@ class CredentialService:
         access_request = await db.get(AccessRequest, req.access_request_id)
         session = await db.get(Session, req.session_id) if req.session_id else None
 
+        target_type = "application" if req.application_id else "asset"
+        target_id = str(req.application_id if req.application_id else req.asset_id)
+
         audit = dict(
             actor=user,
-            target_type="asset",
-            target_id=str(req.asset_id),
+            target_type=target_type,
+            target_id=target_id,
             # These columns are FKs — only set them once the row is known to exist.
             request_id=access_request.id if access_request else None,
             session_id=session.id if session else None,
@@ -145,6 +150,8 @@ class CredentialService:
             "jit_grant_id": str(req.jit_grant_id),
             "session_id": str(req.session_id) if req.session_id else None,
             "provider": self.provider.name,
+            "target_type": target_type,
+            "target_id": target_id,
         }
 
         await write_audit_log(
@@ -155,7 +162,9 @@ class CredentialService:
         reason = await self._authorize(db, req, user, access_request, session)
         ref: Optional[VaultRef] = None
         if reason is None:
-            ref, reason = await self._resolve_reference(db, req.asset_id)
+            ref, reason = await self._resolve_reference(
+                db, asset_id=req.asset_id, application_id=req.application_id
+            )
 
         if reason is not None:
             await write_audit_log(
@@ -206,6 +215,12 @@ class CredentialService:
         access_request: Optional[AccessRequest], session: Optional[Session],
     ) -> Optional[str]:
         """Returns None if every check passes, else the first failing reason code."""
+        # 0. target validation — exactly one target must be specified
+        if (req.asset_id is None and req.application_id is None) or (
+            req.asset_id is not None and req.application_id is not None
+        ):
+            return "INVALID_TARGET_SPECIFICATION"
+
         # 1. user
         if user is None:
             return "USER_NOT_FOUND_OR_INACTIVE"
@@ -217,8 +232,12 @@ class CredentialService:
             return "ACCESS_REQUEST_NOT_FOUND"
         if access_request.user_id != user.id:
             return "ACCESS_REQUEST_USER_MISMATCH"
-        if access_request.asset_id != req.asset_id:
-            return "ACCESS_REQUEST_TARGET_MISMATCH"
+        if req.application_id is not None:
+            if access_request.application_id != req.application_id:
+                return "ACCESS_REQUEST_TARGET_MISMATCH"
+        else:
+            if access_request.asset_id != req.asset_id:
+                return "ACCESS_REQUEST_TARGET_MISMATCH"
         if access_request.status != "ACTIVE":
             return "ACCESS_REQUEST_NOT_ACTIVE"
         if access_request.approval_required:
@@ -231,11 +250,18 @@ class CredentialService:
                 return "APPROVAL_MISSING"
 
         # 3. target
-        asset = await db.get(Asset, req.asset_id)
-        if asset is None or asset.is_deleted:
-            return "ASSET_NOT_FOUND"
-        if not asset.enabled or asset.status != "ACTIVE":
-            return "ASSET_DISABLED"
+        if req.application_id is not None:
+            target_obj = await db.get(Application, req.application_id)
+            if target_obj is None or target_obj.is_deleted:
+                return "APPLICATION_NOT_FOUND"
+            if not target_obj.enabled or target_obj.status != "ACTIVE":
+                return "APPLICATION_DISABLED"
+        else:
+            target_obj = await db.get(Asset, req.asset_id)
+            if target_obj is None or target_obj.is_deleted:
+                return "ASSET_NOT_FOUND"
+            if not target_obj.enabled or target_obj.status != "ACTIVE":
+                return "ASSET_DISABLED"
 
         # 4. JIT grant
         grant = await db.get(JITGrant, req.jit_grant_id)
@@ -244,16 +270,23 @@ class CredentialService:
         if (
             grant.request_id != access_request.id
             or grant.user_id != user.id
-            or grant.asset_id != asset.id
         ):
             return "JIT_GRANT_MISMATCH"
-        if not (grant.protocol == access_request.protocol == asset.protocol):
+        if req.application_id is not None:
+            if grant.application_id != target_obj.id:
+                return "JIT_GRANT_MISMATCH"
+        else:
+            if grant.asset_id != target_obj.id:
+                return "JIT_GRANT_MISMATCH"
+
+        if not (grant.protocol == access_request.protocol == target_obj.protocol):
             return "PROTOCOL_MISMATCH"
         if not self._jit.is_active(grant):
             if grant.status == "ACTIVE":  # lapsed but not yet flipped
                 await self._jit.expire(db, grant)
+                target_type = "application" if req.application_id else "asset"
                 await write_audit_log(
-                    db, actor=user, action="JIT_EXPIRED", target_type="asset", target_id=str(asset.id),
+                    db, actor=user, action="JIT_EXPIRED", target_type=target_type, target_id=str(target_obj.id),
                     request_id=access_request.id, result="SUCCESS", severity="INFO",
                     metadata={"jit_grant_id": str(grant.id), "expires_at": grant.expires_at.isoformat()},
                 )
@@ -266,20 +299,32 @@ class CredentialService:
                 return "SESSION_NOT_FOUND"
             if (
                 session.user_id != user.id
-                or session.asset_id != asset.id
                 or session.request_id != access_request.id
                 or session.jit_grant_id != grant.id
             ):
                 return "SESSION_MISMATCH"
+            if req.application_id is not None:
+                if session.application_id != target_obj.id:
+                    return "SESSION_MISMATCH"
+            else:
+                if session.asset_id != target_obj.id:
+                    return "SESSION_MISMATCH"
             if session.status not in LIVE_SESSION_STATUSES:
                 return "SESSION_NOT_LIVE"
 
         return None
 
-    async def _resolve_reference(self, db: AsyncSession, asset_id: UUID) -> tuple[Optional[VaultRef], Optional[str]]:
-        result = await db.execute(
-            select(VaultRef).where(VaultRef.asset_id == asset_id, VaultRef.is_active == True)
-        )
+    async def _resolve_reference(
+        self, db: AsyncSession, *, asset_id: Optional[UUID] = None, application_id: Optional[UUID] = None
+    ) -> tuple[Optional[VaultRef], Optional[str]]:
+        if application_id is not None:
+            stmt = select(VaultRef).where(VaultRef.application_id == application_id, VaultRef.is_active == True)
+        elif asset_id is not None:
+            stmt = select(VaultRef).where(VaultRef.asset_id == asset_id, VaultRef.is_active == True)
+        else:
+            return None, "NO_CREDENTIAL_REFERENCE"
+
+        result = await db.execute(stmt)
         refs = result.scalars().all()
         if not refs:
             return None, "NO_CREDENTIAL_REFERENCE"

@@ -27,6 +27,8 @@ _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$")
 _DEV_MODE_ENVIRONMENTS = {"development", "test"}
 _PLACEHOLDER_SECRET_KEY = "change-this-to-a-secure-random-string-in-production"
 _MIN_SECRET_KEY_LENGTH = 32
+_PLACEHOLDER_GATEWAY_TOKEN = "dev-insecure-change-me-in-production"
+_MIN_GATEWAY_TOKEN_LENGTH = 32
 
 
 class SettingsError(Exception):
@@ -117,6 +119,28 @@ class Settings(BaseSettings):
     JIT_DEFAULT_DURATION: int = 30  # minutes
     JIT_MAX_DURATION: int = 480  # minutes
 
+    # --- Gateway Auth Hook ---
+    # Pre-shared secret sent by NGINX in X-Gateway-Auth-Token on every
+    # auth_request sub-request.  The /gateway/internal/auth endpoint
+    # validates this header so the endpoint is not publicly exploitable.
+    # Must be set in .env (min 32 chars); never hard-coded.
+    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    GATEWAY_AUTH_TOKEN: str = "dev-insecure-change-me-in-production"
+
+    # --- Gateway Config Manager ---
+    # Directory where NGINX upstream config snippets are written.
+    # Mounted as shared Docker volume 'gateway_config' in both backend (/gateway-config/)
+    # and NGINX (/etc/nginx/conf.d/apps/).  Leave empty to skip config file writing
+    # (e.g. in local dev without Docker).
+    GATEWAY_CONFIG_DIR: str = "/gateway-config"
+    # URL of the NGINX internal control server for triggering reloads.
+    # Example: http://securepam-nginx-gateway:8081
+    # Leave empty to skip reload calls (local dev without NGINX container).
+    GATEWAY_NGINX_CONTROL_URL: str = ""
+    # Browser Isolation service URL
+    GATEWAY_BROWSER_ISOLATION_URL: str = "http://browser-isolation:6080"
+    BROWSER_ISOLATION_ENABLED: bool = True
+
     # --- Security ---
     TOKEN_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int = 7
@@ -170,6 +194,15 @@ class Settings(BaseSettings):
             self.SECRET_KEY == _PLACEHOLDER_SECRET_KEY or len(self.SECRET_KEY) < _MIN_SECRET_KEY_LENGTH
         ):
             errors.append(f"SECRET_KEY must be changed and at least {_MIN_SECRET_KEY_LENGTH} characters when ENVIRONMENT=production")
+        if production and "GATEWAY_AUTH_TOKEN" in self.model_fields_set:
+            if (
+                self.GATEWAY_AUTH_TOKEN == _PLACEHOLDER_GATEWAY_TOKEN
+                or len(self.GATEWAY_AUTH_TOKEN) < _MIN_GATEWAY_TOKEN_LENGTH
+            ):
+                errors.append(
+                    f"GATEWAY_AUTH_TOKEN must be changed from default and at least {_MIN_GATEWAY_TOKEN_LENGTH} characters when ENVIRONMENT=production"
+                )
+
 
         if self.SECRET_PROVIDER == "mock":
             if production:
