@@ -152,7 +152,12 @@ async def request_context_middleware(request: Request, call_next):
             and request.method == "POST"
         )
 
-        if is_api_request and settings.ENVIRONMENT != "test":
+        # NGINX calls the gateway auth hook once per proxied request, all from
+        # its own address, so a per-client bucket would throttle every gateway
+        # user together. The hook is gated by GATEWAY_AUTH_TOKEN instead.
+        is_gateway_auth_hook = request.url.path == f"{api_prefix}/gateway/internal/auth"
+
+        if is_api_request and not is_gateway_auth_hook and settings.ENVIRONMENT != "test":
             limiter = getattr(request.app.state, "rate_limiter", None)
 
             if limiter is None:

@@ -120,3 +120,23 @@ async def test_middleware_allows_requests_under_limit(monkeypatch):
         assert "X-Request-ID" in response.headers
     finally:
         del app.state.rate_limiter
+
+
+@pytest.mark.asyncio
+async def test_gateway_auth_hook_is_not_per_client_rate_limited(monkeypatch):
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    app.state.rate_limiter = FakeRateLimiter(allowed=False)
+
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            hook = await client.get("/api/v1/gateway/internal/auth")
+            other = await client.get("/api/v1/gateway/apps/00000000-0000-0000-0000-000000000000/info")
+
+        # Reached the handler, which refuses the missing gateway token.
+        assert hook.status_code == 403
+        assert other.status_code == 429
+    finally:
+        del app.state.rate_limiter
