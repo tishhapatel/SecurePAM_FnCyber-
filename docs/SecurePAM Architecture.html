@@ -1,0 +1,595 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>SecurePAM Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout concept: a quiet engineering notebook. One row of tabs, each tab = one mechanism drawn once,
+   with a detail panel that answers whatever you click. Teal is the only accent; green/amber/rose are status only. */
+:root{
+  --bg:#f2f5f7; --surface:#ffffff; --surface2:#e9eef2; --ink:#13202b; --muted:#566879; --line:#d3dce4; --line2:#b8c5d0;
+  --accent:#0b7a85; --accent-soft:#d7eef0; --accent-ink:#06555d;
+  --live:#17804f; --live-soft:#dcf1e6; --pend:#a86a0b; --pend-soft:#fbecd1; --absent:#b0392f; --absent-soft:#f8dedb;
+  --font-display:"Familjen Grotesk","Helvetica Neue",Arial,sans-serif;
+  --font-body:"Hanken Grotesk","Helvetica Neue",Arial,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c141b; --surface:#131e28; --surface2:#1a2833; --ink:#e5edf3; --muted:#92a5b5; --line:#263643; --line2:#35495a;
+  --accent:#3cc3cf; --accent-soft:#12383d; --accent-ink:#8fe3ea;
+  --live:#49c488; --live-soft:#123626; --pend:#e5ac4f; --pend-soft:#3a2b0f; --absent:#f0847b; --absent-soft:#411d1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0c141b; --surface:#131e28; --surface2:#1a2833; --ink:#e5edf3; --muted:#92a5b5; --line:#263643; --line2:#35495a;
+  --accent:#3cc3cf; --accent-soft:#12383d; --accent-ink:#8fe3ea;
+  --live:#49c488; --live-soft:#123626; --pend:#e5ac4f; --pend-soft:#3a2b0f; --absent:#f0847b; --absent-soft:#411d1a; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 56px}
+.wrap{max-width:1260px;margin:0 auto}
+h1,h2,h3{font-family:var(--font-display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.05;font-weight:700}
+h2{font-size:clamp(21px,3vw,27px);font-weight:600;line-height:1.15}
+h3{font-size:16px;font-weight:600}
+p{margin:0}
+code,.mono{font-family:var(--font-mono);font-size:.86em}
+a{color:var(--accent-ink)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+header.top{padding-block:34px 18px;display:grid;gap:14px}
+.kicker{font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lede{max-width:68ch;color:var(--muted);font-size:16.5px}
+.legend{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:3px 10px;border-radius:99px;border:1px solid transparent;white-space:nowrap}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.chip.live{color:var(--live);background:var(--live-soft)} .chip.pend{color:var(--pend);background:var(--pend-soft)}
+.chip.absent{color:var(--absent);background:var(--absent-soft)} .chip.neutral{color:var(--muted);background:var(--surface2)}
+.chip.neutral::before{display:none}
+
+nav.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;border-bottom:1px solid var(--line);
+  display:flex;gap:4px;overflow-x:auto;scrollbar-width:thin}
+nav.tabs button{background:none;border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;font-size:14px;color:var(--muted);white-space:nowrap}
+nav.tabs button:hover{background:var(--surface2);color:var(--ink)}
+nav.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+
+section.tab{display:none;padding-block:26px 8px}
+section.tab.on{display:block}
+.head{display:grid;gap:8px;margin-bottom:18px}
+.head p{color:var(--muted);max-width:75ch}
+
+.board{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:900px){.board{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;min-width:0}
+.card.flat{background:transparent;border-style:dashed}
+.diagram{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
+.diagram svg{display:block;width:100%;height:auto;min-width:600px}
+figure{margin:0;display:grid;gap:8px}
+figcaption{font-size:13px;color:var(--muted);padding-inline:4px}
+
+/* detail panel */
+.panel{position:sticky;top:64px;display:grid;gap:10px}
+@media (max-width:900px){.panel{position:static}}
+.panel .sub{font-family:var(--font-mono);font-size:12.5px;color:var(--muted)}
+.panel ul{margin:0;padding-left:18px;display:grid;gap:5px}
+.panel li::marker{color:var(--accent)}
+.rel{display:flex;flex-wrap:wrap;gap:6px}
+.rel button{background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:3px 9px;font-size:12.5px;cursor:pointer}
+.rel button:hover{border-color:var(--accent);color:var(--accent-ink)}
+.label{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+
+/* svg theming (page CSS reaches inline SVG) */
+svg text{fill:currentColor;font-family:var(--font-body)}
+svg .mono{font-family:var(--font-mono)}
+.node{cursor:pointer}
+.node rect.box{fill:var(--surface);stroke:var(--line2);stroke-width:1.2;transition:stroke .15s,fill .15s}
+.node:hover rect.box{stroke:var(--accent)}
+.node.sel rect.box{stroke:var(--accent);stroke-width:2.4;fill:var(--accent-soft)}
+.node.dim{opacity:.38}
+.node.legacy rect.box{stroke-dasharray:5 4;stroke:var(--pend)}
+.node.aux rect.box{stroke-dasharray:2 3}
+.node .t{font-weight:600;font-size:14.5px} .node .s{font-size:11.8px;fill:var(--muted)}
+.dot{stroke:none}.dot.live{fill:var(--live)}.dot.pend{fill:var(--pend)}.dot.absent{fill:var(--absent)}
+.edge{fill:none;stroke:var(--line2);stroke-width:1.4;transition:opacity .15s,stroke .15s}
+.edge.dash{stroke-dasharray:5 4}
+.edge.act{stroke:var(--accent);stroke-width:2.2}
+.edge.dim{opacity:.18}
+.elabel{font-size:11.5px;fill:var(--muted)}
+
+/* stepper */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:left;cursor:pointer;display:grid;gap:3px}
+.step b{font-family:var(--font-display);font-size:14.5px}
+.step span{font-size:12.5px;color:var(--muted)}
+.step[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.step .n{font-family:var(--font-mono);font-size:11px;color:var(--accent-ink)}
+
+/* risk bars */
+.bars{display:grid;gap:7px}
+.bar{display:grid;grid-template-columns:minmax(150px,200px) 1fr 34px;gap:10px;align-items:center;font-size:13px}
+.bar i{display:block;height:10px;border-radius:6px;background:var(--accent)}
+.bar .track{background:var(--surface2);border-radius:6px;height:10px}
+.bar em{font-style:normal;font-family:var(--font-mono);text-align:right}
+.scale{display:grid;grid-template-columns:30fr 30fr 20fr 20fr;border-radius:8px;overflow:hidden;font-size:12.5px;font-weight:600}
+.scale div{padding:8px 10px}
+.scale .l{background:var(--live-soft);color:var(--live)}.scale .m{background:var(--accent-soft);color:var(--accent-ink)}
+.scale .h{background:var(--pend-soft);color:var(--pend)}.scale .c{background:var(--absent-soft);color:var(--absent)}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+.tablewrap{overflow-x:auto}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+
+/* sequence controls */
+.seg{display:inline-flex;background:var(--surface2);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:none;padding:6px 14px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13.5px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.18)}
+.ctl{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.btn{background:var(--surface);border:1px solid var(--line2);border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:600;font-size:13.5px}
+.btn:hover{border-color:var(--accent);color:var(--accent-ink)}
+.seq .row{cursor:pointer}
+.seq .row rect.band{fill:transparent}
+.seq .row:hover rect.band{fill:var(--surface2)}
+.seq .row.sel rect.band{fill:var(--accent-soft)}
+.seq .arrow{stroke:currentColor;stroke-width:1.5;fill:none}
+.seq .arrow.ret{stroke-dasharray:5 4}
+.seq .row.sel .arrow{stroke:var(--accent-ink);stroke-width:2.2}
+.seq .num{fill:var(--surface);stroke:var(--line2)} .seq .row.sel .num{fill:var(--accent);stroke:var(--accent)}
+.seq .row.sel .numt{fill:var(--bg)} .seq .numt{font-size:11px;font-weight:600;text-anchor:middle}
+.seq .lane{stroke:var(--line2);stroke-dasharray:3 5}
+.seq .lanehead rect{fill:var(--surface2);stroke:var(--line2)}
+.seq .lanehead text{font-weight:600;font-size:12.5px;text-anchor:middle}
+.seq .skip{opacity:.28}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:14px}
+.fact{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;gap:6px;align-content:start}
+
+/* data map */
+.domains{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.domain{display:grid;gap:8px;align-content:start}
+.domain h3{font-size:12px;font-family:var(--font-mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.tbl{background:var(--surface);border:1px solid var(--line2);border-radius:8px;padding:7px 10px;text-align:left;cursor:pointer;font-family:var(--font-mono);font-size:12.5px}
+.tbl:hover{border-color:var(--accent)}
+.tbl.sel{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.tbl.nb{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
+.tbl.dimmed{opacity:.35}
+
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.filters button{background:var(--surface);border:1px solid var(--line2);border-radius:99px;padding:5px 14px;cursor:pointer;font-weight:600;font-size:13px}
+.filters button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;display:grid;gap:4px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="kicker">As built and running · 15 Oct 2026</div>
+  <h1>SecurePAM</h1>
+  <p class="lede">A privileged-access gateway. Nobody connects to a server or an internal web app directly: a person asks, the system decides, grants a time-boxed window, and SecurePAM itself opens, records and cuts off the session. Click anything in the diagrams.</p>
+  <div class="legend"><span class="label">Status of each part</span>
+    <span class="chip live">Live</span><span class="chip pend">Written, tested, not yet live</span><span class="chip absent">Not implemented</span></div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Sections" id="tabs"></nav>
+
+<!-- 1 OVERVIEW -->
+<section class="tab" id="p-overview" data-title="System map">
+  <div class="head"><h2>The system map</h2>
+    <p>Two application pairs share one set of services. Pair A signs in with a dev password; pair B signs in through Keycloak with a one-time code. Select a box to see what it does and what it talks to.</p></div>
+  <div class="board">
+    <figure>
+      <div class="diagram"><svg id="map" viewBox="0 0 1000 612" role="img" aria-label="System map: browsers reach two frontends and two backends; the backends use PostgreSQL, Redis, OpenBao, Keycloak, guacd and the isolation daemon, which reach the Kali, Windows and web targets."></svg></div>
+      <figcaption>Solid lines are live calls; dashed lines are auxiliary or legacy. Selecting a box dims everything not connected to it.</figcaption>
+      <div class="rel" id="mapchips" aria-label="All components"></div>
+    </figure>
+    <aside class="card panel" id="mapinfo" aria-live="polite"></aside>
+  </div>
+</section>
+
+<!-- 2 ACCESS WORKFLOW -->
+<section class="tab" id="p-flow" data-title="Access decision">
+  <div class="head"><h2>How a request becomes a grant</h2>
+    <p>One service, <code>AccessDecisionService</code>, runs the whole decision. The route only translates HTTP. Policy and risk are evaluated separately on purpose, so either can be tuned without touching the other.</p></div>
+  <div class="steps" id="steps"></div>
+  <div class="card" id="stepinfo" style="margin-top:12px" aria-live="polite"></div>
+
+  <div class="two" style="margin-top:18px">
+    <div class="card">
+      <h3>Risk score, factor by factor</h3>
+      <p style="color:var(--muted);font-size:13.5px;margin:4px 0 12px">Deterministic rules, not machine learning: the same inputs always give the same score, and every factor carries its reason. Weights are this project's own and overridable by <code>RISK_*</code> settings.</p>
+      <div class="bars" id="bars"></div>
+      <div style="margin-top:14px"><div class="label" style="margin-bottom:6px">Levels (0 to 100)</div>
+        <div class="scale"><div class="l">LOW 0–29</div><div class="m">MEDIUM 30–59</div><div class="h">HIGH 60–79</div><div class="c">CRITICAL 80+</div></div></div>
+    </div>
+    <div class="card">
+      <h3>Decision matrix</h3>
+      <div class="tablewrap"><table>
+        <tr><th>Situation</th><th>Outcome</th></tr>
+        <tr><td>Policy denies</td><td><b>DENIED</b>, always</td></tr>
+        <tr><td>Risk CRITICAL, no policy</td><td><b>DENIED</b></td></tr>
+        <tr><td>Risk CRITICAL, with policy</td><td>Elevated <b>APPROVAL_REQUIRED</b></td></tr>
+        <tr><td>Risk HIGH</td><td>Always <b>APPROVAL_REQUIRED</b></td></tr>
+        <tr><td>Risk LOW or MEDIUM</td><td>Whatever the policy says</td></tr>
+      </table></div>
+      <h3 style="margin-top:16px">Request states</h3>
+      <figure style="margin-top:6px"><div class="diagram" style="padding:6px"><svg viewBox="0 0 520 150" role="img" aria-label="Request states: PENDING becomes APPROVAL_REQUIRED or APPROVED; approval leads to APPROVED, then ACTIVE, then EXPIRED; DENIED and CANCELLED end the request." style="min-width:480px">
+        <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <g font-size="11.5" font-weight="600" text-anchor="middle">
+          <rect x="6" y="52" width="84" height="30" rx="7" fill="var(--surface2)" stroke="var(--line2)"/><text x="48" y="71">PENDING</text>
+          <rect x="112" y="14" width="146" height="30" rx="7" fill="var(--pend-soft)" stroke="var(--pend)"/><text x="185" y="33" style="fill:var(--pend)">APPROVAL_REQUIRED</text>
+          <rect x="274" y="52" width="84" height="30" rx="7" fill="var(--accent-soft)" stroke="var(--accent)"/><text x="316" y="71" style="fill:var(--accent-ink)">APPROVED</text>
+          <rect x="388" y="52" width="60" height="30" rx="7" fill="var(--live-soft)" stroke="var(--live)"/><text x="418" y="71" style="fill:var(--live)">ACTIVE</text>
+          <rect x="456" y="104" width="60" height="30" rx="7" fill="var(--surface2)" stroke="var(--line2)"/><text x="486" y="123">EXPIRED</text>
+          <rect x="120" y="104" width="84" height="30" rx="7" fill="var(--absent-soft)" stroke="var(--absent)"/><text x="162" y="123" style="fill:var(--absent)">DENIED</text>
+          <rect x="226" y="104" width="94" height="30" rx="7" fill="var(--surface2)" stroke="var(--line2)"/><text x="273" y="123">CANCELLED</text>
+        </g>
+        <g class="edge" style="color:var(--ink)" marker-end="url(#ar1)">
+          <path d="M90 62 L112 34" marker-end="url(#ar1)"/><path d="M90 72 L274 67" marker-end="url(#ar1)"/>
+          <path d="M258 32 L296 52" marker-end="url(#ar1)"/><path d="M358 67 L388 67" marker-end="url(#ar1)"/>
+          <path d="M440 82 L470 104" marker-end="url(#ar1)"/><path d="M66 82 L140 104" marker-end="url(#ar1)"/>
+        </g>
+        <text x="62" y="45" class="elabel" font-size="10">resolved at once</text>
+        <text x="258" y="40" class="elabel" font-size="10">human approves</text>
+      </svg></div><figcaption>A persisted request is never left at PENDING. Invalid transitions raise an error, and you cannot approve your own request.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- 3 SESSIONS -->
+<section class="tab" id="p-sessions" data-title="Session launch">
+  <div class="head"><h2>How a session is launched and policed</h2>
+    <p>SSH, RDP and the isolated browser share one launch pattern. The browser never touches the credential or the target: it only holds a one-time ticket for 60 seconds. Pick a protocol, then step through (arrow keys work).</p></div>
+  <div class="ctl">
+    <div class="seg" id="proto" role="group" aria-label="Protocol">
+      <button data-p="ssh" aria-pressed="true">SSH</button><button data-p="rdp" aria-pressed="false">RDP</button><button data-p="web" aria-pressed="false">Isolated browser</button>
+    </div>
+    <button class="btn" id="prev">◀ Previous</button><button class="btn" id="next">Next ▶</button>
+  </div>
+  <div class="board">
+    <figure>
+      <div class="diagram seq"><svg id="seq" viewBox="0 0 1000 640" role="img" aria-label="Sequence diagram of a session launch from the browser through the backend, Redis, OpenBao, the gateway and the target."></svg></div>
+      <figcaption id="seqcap"></figcaption>
+    </figure>
+    <aside class="card panel" id="seqinfo" aria-live="polite"></aside>
+  </div>
+  <div class="facts" id="facts"></div>
+</section>
+
+<!-- 4 SECRETS -->
+<section class="tab" id="p-secrets" data-title="Secrets">
+  <div class="head"><h2>Where credentials live and how they are used</h2>
+    <p>A password is typed once into the GUI, kept only in OpenBao, and only ever handed to a protocol handshake on the server. The database stores a reference, never the secret.</p></div>
+  <div class="ctl"><div class="seg" id="sflow" role="group" aria-label="Flow">
+    <button data-f="store" aria-pressed="true">Storing a credential</button><button data-f="use" aria-pressed="false">Using it in a session</button></div></div>
+  <div class="board">
+    <figure>
+      <div class="diagram"><svg id="sec" viewBox="0 0 1000 400" role="img" aria-label="Credential flow between the GUI, the backend, OpenBao and the database."></svg></div>
+      <figcaption id="seccap"></figcaption>
+    </figure>
+    <aside class="card panel" id="secinfo" aria-live="polite"></aside>
+  </div>
+  <div class="two" style="margin-top:18px">
+    <div class="card"><h3>The vault, as running</h3>
+      <ul style="margin:8px 0 0;padding-left:18px;display:grid;gap:5px">
+        <li><b>https://127.0.0.1:18210</b>, TLS 1.2+, checked against a local CA.</li>
+        <li>Raft storage on disk, <b>Shamir seal: 3 shares, any 2 unseal</b>. It starts sealed after every restart.</li>
+        <li>File audit device; KV v2 mount <code>secret/</code>; credentials at <code>secret/securepam/assets/kali</code> and <code>…/win11-lab</code>.</li>
+        <li>Application tokens last 30 days, are non-renewable and orphaned.</li></ul></div>
+    <div class="card"><h3>Three identities, three policies</h3>
+      <div class="tablewrap"><table>
+        <tr><th>Identity</th><th>Can</th></tr>
+        <tr><td><code>securepam-read</code></td><td>read those two paths</td></tr>
+        <tr><td><code>securepam-writer</code></td><td>create / update those two paths, nothing else</td></tr>
+        <tr><td><code>securepam-admin</code></td><td>mint and revoke the two tokens, check capabilities, snapshot. No access to real credentials, not root.</td></tr>
+      </table></div></div>
+  </div>
+</section>
+
+<!-- 5 DATA -->
+<section class="tab" id="p-data" data-title="Data model">
+  <div class="head"><h2>The database</h2>
+    <p>Twenty application tables in PostgreSQL, plus the migration table. Select a table to see its purpose and highlight the tables it is tied to by foreign keys.</p></div>
+  <div class="board">
+    <div class="domains" id="domains"></div>
+    <aside class="card panel" id="datainfo" aria-live="polite"></aside>
+  </div>
+</section>
+
+<!-- 6 STATUS -->
+<section class="tab" id="p-gaps" data-title="What exists">
+  <div class="head"><h2>What exists, what is waiting, what is missing</h2>
+    <p>The state of the system on 15 Oct 2026. “Waiting” means written and tested but not yet running on the live processes.</p></div>
+  <div class="filters" id="filters" role="group" aria-label="Filter"></div>
+  <div class="card tablewrap" style="padding:6px 10px"><table id="matrix"><thead><tr><th style="width:36%">Capability</th><th style="width:20%">Status</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<div class="foot">
+  <div>Source of truth: <code>docs/SECUREPAM-ARCHITECTURE.md</code> in the repository; start and status scripts in <code>docs/SECUREPAM-STARTUP-RUNBOOK.md</code>.</div>
+  <div>Everything binds to 127.0.0.1. Ports 3000 and 8000 belong to a different project and are never touched.</div>
+</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+function $(s,r){return (r||document).querySelector(s);}
+function el(tag,attrs,parent,text){var e=document.createElementNS(NS,tag);for(var k in attrs){e.setAttribute(k,attrs[k]);}if(text!==undefined){e.textContent=text;}if(parent){parent.appendChild(e);}return e;}
+function h(tag,attrs,parent,html){var e=document.createElement(tag);for(var k in (attrs||{})){e.setAttribute(k,attrs[k]);}if(html!==undefined){e.innerHTML=html;}if(parent){parent.appendChild(e);}return e;}
+function chip(status){var m={live:["live","Live"],pend:["pend","Written, not yet live"],absent:["absent","Not implemented"],legacy:["pend","Legacy"],aux:["neutral","Auxiliary"]};var x=m[status]||["neutral",status];return '<span class="chip '+x[0]+'">'+x[1]+'</span>';}
+
+/* ---------- tabs ---------- */
+var TABS=["overview","flow","sessions","secrets","data","gaps"];
+var tabsEl=$("#tabs");
+TABS.forEach(function(id){var s=document.getElementById("p-"+id);var b=h("button",{role:"tab","data-t":id,"aria-selected":"false"},tabsEl,s.getAttribute("data-title"));b.addEventListener("click",function(){show(id);});});
+function show(id){if(TABS.indexOf(id)<0){id="overview";}
+  TABS.forEach(function(t){document.getElementById("p-"+t).classList.toggle("on",t===id);});
+  Array.prototype.forEach.call(tabsEl.children,function(b){b.setAttribute("aria-selected",b.getAttribute("data-t")===id?"true":"false");});
+  try{history.replaceState(null,"","#"+id);}catch(e){}}
+window.addEventListener("hashchange",function(){show(location.hash.slice(1));});
+
+/* ---------- 1. system map ---------- */
+var N={
+ browser:{x:380,y:12,w:240,h:46,t:"Browser",s:"operator · approver · auditor · admin",st:"live",
+  d:"Every person uses SecurePAM through a browser. The browser never receives a password and never connects to a server: terminals, desktops and web pages are streamed through the backend.",
+  b:["Holds only the login token and, per session, a one-time ticket valid for 60 seconds.","Terminal = xterm.js, desktop = guacamole-common-js, isolated web page = noVNC."]},
+ fe1:{x:110,y:100,w:250,h:54,t:"Frontend :3001",s:"React · dev username + password",st:"live",
+  d:"React app served by Vite, pointed at backend 8001. Uses the local dev login. This is the pair used for day-to-day demos.",
+  b:["Stack: React, TypeScript, TanStack Query, axios.","API base comes from VITE_API_URL=http://localhost:8001."]},
+ fe2:{x:640,y:100,w:250,h:54,t:"Frontend :3002",s:"React · Keycloak login + one-time code",st:"live",
+  d:"The same React app, pointed at backend 8002. It shows “Sign in with Keycloak” and sends the user through password plus TOTP.",
+  b:["Uses keycloak-js; the backend publishes the realm and client in /auth/config.","Redirect URI for port 3002 is registered on the Keycloak client."]},
+ be1:{x:110,y:206,w:250,h:64,t:"Backend :8001",s:"FastAPI · DEV_MODE=true · staging vault",st:"live",
+  d:"The control plane and the gateways in one FastAPI process: decisions, approvals, JIT grants, credential checkout, SSH/RDP/web session relays, recordings, audit.",
+  b:["Dev login issues an HS256 token (1 h). Authorization still comes from the local role tables.","Uses the staging OpenBao over verified TLS, with separate reader and writer tokens.","Runs background loops: recording reconciler (60 s) and Risk Centre (5 min)."]},
+ be2:{x:640,y:206,w:250,h:64,t:"Backend :8002",s:"FastAPI · OIDC (Keycloak) · legacy dev vault",st:"live",
+  d:"The same code with DEV_MODE=false. It validates Keycloak access tokens (RS256) and maps the token's subject to a local user row.",
+  b:["No account is auto-created: the user row must already carry the Keycloak subject id.","Still configured for the in-memory dev OpenBao on :18200 with old token files. After a reboot its credential retrieval has no vault."]},
+ pg:{x:12,y:358,w:148,h:58,t:"PostgreSQL",s:":5432 · Homebrew",st:"live",
+  d:"The system of record: users, roles, requests, approvals, JIT grants, sessions, recordings metadata, audit, risk findings, vault references.",
+  b:["20 application tables, Alembic migrations (head d4e5f6a7b8c9).","Both backends use the same database."]},
+ redis:{x:176,y:358,w:148,h:58,t:"Redis",s:":6379 · Homebrew",st:"live",
+  d:"Short-lived state only: API rate-limit counters and the one-time session tickets.",
+  b:["Tickets: 256-bit, 60 s, consumed atomically (GETDEL) so they work once.","If Redis is unreachable the ticket service fails closed."]},
+ ob:{x:340,y:358,w:148,h:58,t:"OpenBao",s:":18210 · TLS · Raft",st:"live",
+  d:"The secret store. Holds the Kali and Windows credentials. Raft storage on disk, Shamir seal (3 shares, 2 needed), started by a macOS LaunchAgent.",
+  b:["Starts sealed after every restart; needs two of the three shares.","Backend verifies its certificate against a local CA.","File audit device is on."]},
+ kc:{x:504,y:358,w:148,h:58,t:"Keycloak",s:":8080 · realm",st:"live",
+  d:"Identity and MFA. Browser flow = password then TOTP. A custom event listener logs failed one-time codes.",
+  b:["Persists to its own Postgres container (volume securepam_keycloak_postgres_data).","The failed-code import into SecurePAM's audit log exists in code but is switched off."]},
+ guacd:{x:668,y:358,w:148,h:58,t:"guacd",s:":4822 · RDP proxy",st:"live",
+  d:"Speaks RDP to Windows. The backend talks the Guacamole protocol to it over TCP and relays the stream to the browser.",
+  b:["Writes the screen recording into a folder shared with the backend (~/securepam-data/recordings/rdp).","The Guacamole web app (:8081) sits beside it but is not in SecurePAM's request path."]},
+ iso:{x:832,y:358,w:148,h:58,t:"Isolation daemon",s:":6090 · container",st:"live",
+  d:"Starts one disposable browser per session: Xvfb, Chromium in kiosk mode, x11vnc and an egress proxy that allows only the registered destination.",
+  b:["Container is non-root, read-only filesystem, no capabilities.","Chromium policy blocks downloads, printing, DevTools, file:// and chrome:// pages.","An upload block and a real health probe are written and tested but not yet live."]},
+ kali:{x:30,y:520,w:148,h:54,t:"Kali VM",s:"SSH :22",st:"live",
+  d:"A lab Linux target. The backend reaches it directly with asyncssh; the target's SSH host key must be pinned in known_hosts first.",
+  b:["Host key was verified on the VM console before it was trusted.","Either backend can open this connection."]},
+ obdev:{x:340,y:520,w:148,h:54,t:"OpenBao dev",s:":18200 · in-memory",st:"legacy",cls:"legacy",
+  d:"The earlier development instance, started by hand. Everything in it is lost when it stops. Only backend 8002 still points here.",
+  b:["Not managed by the start scripts.","Moving 8002 to the staging vault is an open decision."]},
+ win:{x:668,y:520,w:148,h:54,t:"Windows VM",s:"RDP :3389 · NLA",st:"live",
+  d:"A lab Windows 11 machine reached through guacd. The Windows host's TLS certificate is not validated (a lab setting).",
+  b:["Windows command telemetry (4688, 4104, Sysmon) is not integrated.","With the pending change, the SecurePAM session number is sent as the RDP client name."]},
+ web:{x:832,y:520,w:148,h:54,t:"Registered web app",s:"HTTPS · isolated",st:"live",
+  d:"An internal application registered by an admin. The destination comes only from that record; nothing in a request can change it.",
+  b:["Only apps set to ISOLATED_BROWSER launch. A reverse-proxy mode (STANDARD_PROXY) is not implemented."]}
+};
+var E=[["browser","fe1"],["browser","fe2"],["fe1","be1","REST + WS"],["fe2","be2","REST + WS"],
+ ["be1","pg"],["be1","redis"],["be1","ob","verified TLS"],["be1","guacd"],["be1","iso"],
+ ["be2","pg"],["be2","redis"],["be2","kc","token keys"],["be2","obdev","","dash"],["be2","guacd"],["be2","iso"],
+ ["guacd","win","RDP"],["iso","web","HTTPS"],["be1","kali","SSH (asyncssh)","side"]];
+var map=$("#map"),edgeEls=[],nodeEls={},selNode=null;
+(function buildMap(){
+  var defs=el("defs",{},map);var m=el("marker",{id:"ah",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"},defs);el("path",{d:"M0 0L10 5L0 10z",fill:"currentColor",style:"color:var(--line2)"},m);
+  var out={},inn={};E.forEach(function(e){out[e[0]]=(out[e[0]]||0)+1;});
+  var oi={};
+  E.forEach(function(e){var a=N[e[0]],b=N[e[1]],k=e[0];oi[k]=(oi[k]||0)+1;var n=out[k];
+    var sx=a.x+oi[k]*a.w/(n+1),sy=a.y+a.h,tx=b.x+b.w/2,ty=b.y,d;
+    if(e[3]==="side"){sx=a.x;sy=a.y+a.h/2;d="M"+sx+" "+sy+" H8 V"+(b.y+b.h/2)+" H"+b.x;}
+    else if(ty<=sy){d="M"+sx+" "+sy+" L"+tx+" "+ty;}
+    else{var dy=Math.max(28,(ty-sy)*.45);d="M"+sx+" "+sy+" C"+sx+" "+(sy+dy)+" "+tx+" "+(ty-dy)+" "+tx+" "+ty;}
+    var p=el("path",{d:d,"class":"edge"+(e[3]==="dash"?" dash":""),"marker-end":"url(#ah)"},map);
+    edgeEls.push({a:e[0],b:e[1],p:p});
+    if(e[2]&&e[3]!=="side"){el("text",{x:(sx+tx)/2+6,y:(sy+ty)/2+(ty<=sy?-4:2),"class":"elabel"},map,e[2]);}
+  });
+  Object.keys(N).forEach(function(id){var n=N[id];
+    var g=el("g",{"class":"node"+(n.cls?" "+n.cls:""),tabindex:"0",role:"button","aria-label":n.t+", "+n.s,"data-id":id},map);
+    el("rect",{"class":"box",x:n.x,y:n.y,width:n.w,height:n.h,rx:9},g);
+    el("text",{"class":"t",x:n.x+12,y:n.y+(n.h>50?23:21)},g,n.t);
+    el("text",{"class":"s mono",x:n.x+12,y:n.y+(n.h>50?42:36)},g,n.s);
+    el("circle",{"class":"dot "+(n.st==="legacy"?"pend":n.st),cx:n.x+n.w-14,cy:n.y+14,r:4.5},g);
+    g.addEventListener("click",function(){pick(id);});
+    g.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();pick(id);}});
+    nodeEls[id]=g;});
+  el("text",{x:14,y:300,"class":"elabel"},map,"SSH (asyncssh)");
+  Object.keys(N).forEach(function(id){var c=h("button",{},$("#mapchips"),N[id].t);c.addEventListener("click",function(){pick(id);});});
+})();
+function related(id){var r=[];E.forEach(function(e){if(e[0]===id&&r.indexOf(e[1])<0){r.push(e[1]);}if(e[1]===id&&r.indexOf(e[0])<0){r.push(e[0]);}});return r;}
+function pick(id){selNode=id;var n=N[id],rel=related(id);
+  Object.keys(nodeEls).forEach(function(k){nodeEls[k].classList.toggle("sel",k===id);nodeEls[k].classList.toggle("dim",k!==id&&rel.indexOf(k)<0);});
+  edgeEls.forEach(function(e){var on=(e.a===id||e.b===id);e.p.classList.toggle("act",on);e.p.classList.toggle("dim",!on);});
+  var box=$("#mapinfo");box.innerHTML="";
+  h("div",{"class":"label"},box,"Component");h("h3",{},box,n.t);h("div",{"class":"sub"},box,n.s);
+  var c=h("div",{},box,chip(n.st));h("p",{},box,n.d);var ul=h("ul",{},box);n.b.forEach(function(x){h("li",{},ul,x);});
+  if(rel.length){h("div",{"class":"label"},box,"Talks to");var r=h("div",{"class":"rel"},box);rel.forEach(function(k){var b=h("button",{},r,N[k].t);b.addEventListener("click",function(){pick(k);});});}
+}
+pick("be1");
+
+/* ---------- 2. access workflow ---------- */
+var STEPS=[
+ {n:"1",t:"Request",s:"who, what, how long",d:"The operator submits a target (an asset or an application, never both), a protocol and a duration, with a justification. The route checks only that they hold access_requests:create, then hands everything to the decision service.",b:["Exactly one of asset or application must be given.","The protocol must match the target's own protocol."]},
+ {n:"2",t:"Load the target",s:"exists, enabled",d:"The service loads the target and refuses a deleted or disabled one, then loads the target's policy if it has one.",b:["No policy attached means a fail-safe default is used.","Disabled policies are treated the same way."]},
+ {n:"3",t:"Policy",s:"is this allowed at all?",d:"One target against one policy. The result is structured and explainable with reason codes. It does not look at risk.",b:["Can restrict roles, asset types, environments, protocols, days and business hours.","Carries flags: require_approval, jit_required, require_mfa, require_recording, max_session_duration, auto_approve, deny_access.","require_mfa is recorded on the request but is not re-verified at credential checkout."]},
+ {n:"4",t:"Risk",s:"how dangerous is this?",d:"A deterministic score from ten rules over data already in the request, target and user. Each factor lists its points and its reason; the score is their sum.",b:["Production asset +30, critical asset +25, outside business hours +20, first-ever request +20, and so on (see the bars below).","Kept apart from policy so either can change independently."]},
+ {n:"5",t:"Decision",s:"combine the two",d:"The matrix on the right: a policy denial always wins; HIGH risk always needs a human; LOW and MEDIUM follow the policy.",b:["Outcome is DENIED, APPROVAL_REQUIRED or APPROVED."]},
+ {n:"6",t:"Approval",s:"a different person",d:"When approval is required, an approver accepts or rejects. Anyone with approvals:approve can act, but never on their own request.",b:["State changes are validated; an invalid transition raises an error.","Both outcomes are audited with the approver's identity."]},
+ {n:"7",t:"JIT grant",s:"a time-boxed window",d:"On approval a grant is created. The duration is clamped to the policy and decision ceiling: default 30 minutes, hard maximum 480. Only this one place ever computes an expiry.",b:["JITService.validate() is the single authority on whether a grant is live. Every gateway calls it, and the gateways re-check every second.","An administrator can revoke a grant early; that also ends every session it authorised."]},
+ {n:"8",t:"Audit",s:"every step recorded",d:"Each decision writes audit events (and a risk event). The rule in code: never put a secret into audit metadata.",b:["Audit rows can also be written as secret-scrubbed JSON lines for a SIEM; that sink is configured in code but not enabled."]}];
+var stepsEl=$("#steps");
+STEPS.forEach(function(s,i){var b=h("button",{"class":"step","aria-pressed":"false"},stepsEl,'<span class="n">STEP '+s.n+'</span><b>'+s.t+'</b><span>'+s.s+'</span>');b.addEventListener("click",function(){stepPick(i);});});
+function stepPick(i){var s=STEPS[i];Array.prototype.forEach.call(stepsEl.children,function(c,k){c.setAttribute("aria-pressed",k===i?"true":"false");});
+  var box=$("#stepinfo");box.innerHTML="";h("div",{"class":"label"},box,"Step "+s.n);h("h3",{style:"margin:2px 0 6px"},box,s.t);h("p",{},box,s.d);var ul=h("ul",{style:"margin:10px 0 0;padding-left:18px;display:grid;gap:5px"},box);s.b.forEach(function(x){h("li",{},ul,x);});}
+stepPick(4);
+var RISK=[["Production asset",30],["Critical asset",25],["Sensitive application",20],["High-privilege role",20],["Outside business hours",20],["Unknown context (no source IP)",20],["Repeated auth failure",20],["Unusual pattern (first request)",20],["High criticality",15],["Long duration (over 60 min)",10]];
+var bars=$("#bars");RISK.forEach(function(r){h("div",{"class":"bar"},bars,'<span>'+r[0]+'</span><div class="track"><i style="width:'+(r[1]/30*100)+'%"></i></div><em>+'+r[1]+'</em>');});
+
+/* ---------- 3. sessions: sequence ---------- */
+var LANES=[["browser","Browser",84],["api","Backend",254],["redis","Redis",424],["vault","OpenBao",594],["gw","Gateway",764],["tgt","Target",924]];
+var PROTO={
+ ssh:{gw:"asyncssh",tgt:"Kali :22",cred:true,
+  open:"Open SSH + PTY",openD:"The backend dials the registered IP with asyncssh. The target's host key is checked against a pinned known_hosts file: unknown or changed means refuse. The credential is used only for the handshake, then wiped.",
+  wire:"SSHv2",close:"Close; hash recording",closeD:"The connection is closed, the asciicast recording is finalized and its SHA-256 stored, then the session is marked.",
+  facts:[["Recording","Live","asciicast v2 of terminal output and resizes. Keystrokes are not recorded, so typed passwords never reach the file. Created exclusively, mode 0600, hashed on close.","live"],
+   ["Activity transcript","Live","Typed lines paired with the output that followed, redacted best-effort. It is observed input, not proof of execution.","live"],
+   ["Host trust","Live","Fail-closed pinned keys; no trust-on-first-use. The file is read once and cached, so edits need a backend restart.","live"],
+   ["Limits","Live","Per-user concurrent cap (default 2, an admin can change it), grant checked every second.","live"]]},
+ rdp:{gw:"guacd",tgt:"Windows :3389",cred:true,
+  open:"Guacamole handshake",openD:"The backend opens a TCP stream to guacd and sends the target, username, password and recording path. The credential stays on the server. A required recording must exist before any desktop frame is shown to the browser.",
+  wire:"RDP (NLA)",close:"Close; hash recording",closeD:"guacd's recording is checked (well-formed stream with display frames), hashed, and only then marked COMPLETED. Anything else is FAILED with the reason.",
+  facts:[["Recording","Live","guacd writes the screen stream to ~/securepam-data/recordings/rdp/<session>/recording, shared with the backend. Playback re-verifies the SHA-256.","live"],
+   ["Clipboard, files, printing","Waiting","Default-deny controls with a count-only audit event are written and tested (guacd parameter names verified), not yet live. Until then Guacamole's defaults apply.","pend"],
+   ["Session identifier on Windows","Waiting","The SecurePAM session number as the RDP client name, for correlation. Whether Windows logs record it is unverified.","pend"],
+   ["Command telemetry","Missing","Windows 4688 / PowerShell 4104 / Sysmon are not integrated, so there is no RDP transcript.","absent"],
+   ["Certificate check","Weak","The Windows host's TLS certificate is not validated (RDP_IGNORE_CERT=true), a lab setting.","absent"]]},
+ web:{gw:"Isolation daemon",tgt:"Registered web app",cred:false,
+  open:"Start Xvfb + Chromium + VNC",openD:"The daemon launches a disposable browser locked to the registered application, behind an egress proxy that allows only that host and port. The backend terminates the VNC handshake itself, so the browser's noVNC never learns the VNC password.",
+  wire:"HTTPS via proxy",close:"Destroy the browser",closeD:"The relay is closed and the browser, its display and its proxy are destroyed. A session that never connects is reaped too.",
+  facts:[["Recording","Missing","None. A session whose request or application requires recording is refused rather than run unrecorded.","absent"],
+   ["Navigation and violations","Partial","Destination and out-of-scope navigation violations are audited. Allowed page visits are not logged.","pend"],
+   ["Downloads, printing, DevTools","Live","Blocked by Chromium managed policy; file:// and chrome:// pages blocked.","live"],
+   ["Uploads","Waiting","AllowFileSelectionDialogs=false is written and the image is built as a test tag; the running container needs a rebuild.","pend"],
+   ["Clipboard","Live","Off in both directions unless the application allows it; not audited when allowed.","live"],
+   ["Health reporting","Waiting","The real, bounded probe is tested; the live status page still reports it as not deployed.","pend"]]}};
+var cur="ssh",curStep=0;
+function steps(p){var P=PROTO[p];return [
+ {f:"browser",t:"api",l:"POST /sessions/"+p+"/launch",d:"The backend checks the caller's permission (sessions:create), an ACTIVE access request of their own, a live JIT grant bound to that request, and the per-user concurrent-session cap. The cap is enforced under a row lock so two simultaneous launches cannot both slip in.",cred:false},
+ {f:"api",t:"vault",l:"pre-check credential",d:"A dry check that the credential reference resolves. Nothing is used yet. Web sessions use no stored credential, so this step does not exist for them.",cred:true},
+ {f:"api",t:"redis",l:"mint one-time ticket (60 s)",d:"A 256-bit random ticket stored in Redis for 60 seconds, bound to the session, user, asset, request and grant. It holds no secret.",cred:false},
+ {f:"api",t:"browser",l:"session id + ticket + ws_url",ret:true,d:"The response contains no credential and no filesystem path. The session is STARTING.",cred:false},
+ {f:"browser",t:"api",l:"WS first frame {auth, ticket}",d:"The ticket travels in the first WebSocket message, never in the URL, so it cannot end up in proxy or access logs.",cred:false},
+ {f:"api",t:"redis",l:"redeem ticket (GETDEL)",d:"Consumed atomically: a second use finds nothing. If Redis is down the ticket service refuses rather than proceeding unverified.",cred:false},
+ {f:"api",t:"api",self:true,l:"re-validate from the database",d:"User active, asset enabled, request ACTIVE, grant live, session bound to the same ids. Authorization is decided from the database again, not from the ticket.",cred:false},
+ {f:"api",t:"vault",l:"credential checkout",d:"Backend-only code path with six ordered checks; each failure refuses. On success the secret is read and handed straight to the protocol handshake, then wiped. Audit: ATTEMPTED, then RETRIEVED, DENIED or FAILED.",cred:true},
+ {f:"api",t:"gw",l:P.open,d:P.openD,cred:false},
+ {f:"gw",t:"tgt",l:P.wire,d:"The only hop that touches the target. The browser is never on this path.",cred:false},
+ {f:"api",t:"api",self:true,l:"every second: grant still live?",d:"A monitor re-validates the grant, the user and the asset each second. Expiry, revocation, deactivation or an admin termination closes the relay and the real connection, so a session cannot outlive its grant.",cred:false},
+ {f:"api",t:"gw",l:P.close,d:P.closeD,cred:false}];}
+function laneX(id){for(var i=0;i<LANES.length;i++){if(LANES[i][0]===id){return LANES[i][2];}}return 0;}
+function drawSeq(){var svg=$("#seq");svg.innerHTML="";var P=PROTO[cur],S=steps(cur),top=84,gap=46;
+  svg.setAttribute("viewBox","0 0 1000 "+(top+S.length*gap+24));
+  var defs=el("defs",{},svg),mk=el("marker",{id:"sa",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"},defs);el("path",{d:"M0 0L10 5L0 10z",fill:"currentColor"},mk);
+  LANES.forEach(function(l){var name=l[0]==="gw"?P.gw:(l[0]==="tgt"?P.tgt:l[1]);var g=el("g",{"class":"lanehead"},svg);
+    el("rect",{x:l[2]-58,y:12,width:116,height:34,rx:8},g);el("text",{x:l[2],y:34},g,name);
+    el("line",{"class":"lane",x1:l[2],y1:50,x2:l[2],y2:top+S.length*gap+8},svg);});
+  S.forEach(function(s,i){var y=top+i*gap,skip=(s.cred&&!P.cred);
+    var g=el("g",{"class":"row"+(i===curStep?" sel":"")+(skip?" skip":""),"data-i":i,tabindex:"0",role:"button","aria-label":"Step "+(i+1)+": "+s.l},svg);
+    el("rect",{"class":"band",x:0,y:y-gap/2+4,width:1000,height:gap-4,rx:6},g);
+    el("circle",{"class":"num",cx:22,cy:y,r:11},g);el("text",{"class":"numt",x:22,y:y+4},g,String(i+1));
+    var x1=laneX(s.f),x2=laneX(s.t);
+    if(s.self){var p=el("path",{"class":"arrow","marker-end":"url(#sa)",d:"M"+x1+" "+(y-9)+" h42 v18 h-42"},g);el("text",{x:x1+52,y:y+4,"font-size":"12.5"},g,s.l+(skip?"":""));}
+    else{var dir=x2>x1?1:-1;el("line",{"class":"arrow"+(s.ret?" ret":""),x1:x1+dir*4,y1:y,x2:x2-dir*8,y2:y,"marker-end":"url(#sa)"},g);
+      var tx=(x1+x2)/2;el("text",{x:tx,y:y-7,"text-anchor":"middle","font-size":"12.5"},g,s.l);}
+    g.addEventListener("click",function(){curStep=i;drawSeq();});
+    g.addEventListener("keydown",function(ev){if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();curStep=i;drawSeq();}});
+  });
+  var s=S[curStep],skipCur=(s.cred&&!P.cred),box=$("#seqinfo");box.innerHTML="";
+  h("div",{"class":"label"},box,"Step "+(curStep+1)+" of "+S.length);h("h3",{},box,s.l);
+  h("p",{},box,skipCur?"Not used for this protocol. The isolated browser never holds a stored credential; it opens the registered application directly.":s.d);
+  var from=(s.f==="gw"?P.gw:(s.f==="tgt"?P.tgt:LANES.filter(function(l){return l[0]===s.f;})[0][1])),to=(s.t==="gw"?P.gw:(s.t==="tgt"?P.tgt:LANES.filter(function(l){return l[0]===s.t;})[0][1]));
+  h("div",{"class":"sub"},box,from+(s.self?" (itself)":" → "+to));
+  $("#seqcap").textContent={ssh:"SSH: the backend is the SSH client. The browser only sees terminal output.",rdp:"RDP: the backend relays Guacamole instructions between the browser and guacd.",web:"Isolated browser: the browser views a disposable remote browser; no credential is involved."}[cur];
+  var f=$("#facts");f.innerHTML="";P.facts.forEach(function(x){h("div",{"class":"fact"},f,'<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>'+x[0]+'</b>'+chip(x[3])+'</div><p style="color:var(--muted);font-size:13.5px">'+x[2]+'</p>');});
+}
+Array.prototype.forEach.call(document.querySelectorAll("#proto button"),function(b){b.addEventListener("click",function(){cur=b.getAttribute("data-p");Array.prototype.forEach.call(document.querySelectorAll("#proto button"),function(x){x.setAttribute("aria-pressed",x===b?"true":"false");});curStep=0;drawSeq();});});
+$("#prev").addEventListener("click",function(){curStep=Math.max(0,curStep-1);drawSeq();});
+$("#next").addEventListener("click",function(){curStep=Math.min(steps(cur).length-1,curStep+1);drawSeq();});
+document.addEventListener("keydown",function(ev){if(!$("#p-sessions").classList.contains("on")){return;}
+  if(ev.target.closest&&ev.target.closest("nav"))return;
+  if(ev.key==="ArrowRight"){curStep=Math.min(steps(cur).length-1,curStep+1);drawSeq();ev.preventDefault();}
+  if(ev.key==="ArrowLeft"){curStep=Math.max(0,curStep-1);drawSeq();ev.preventDefault();}});
+drawSeq();
+
+/* ---------- 4. secrets ---------- */
+var SF={
+ store:{cap:"Storing: the browser sends the password to the backend once; the backend writes it to OpenBao and keeps only a reference.",
+  nodes:[["gui","GUI (admin)",50,150,160,64,"types the password once"],["api","Backend",370,150,160,64,"uses the WRITER token"],["vault","OpenBao",690,150,160,64,"secret/securepam/ assets/kali"],["db","PostgreSQL",690,290,160,64,"vault_refs: path, user, version"]],
+  arrows:[["gui","api","PUT credential"],["api","vault","POST …/data/kali"],["vault","api","read back (reader) to verify",true],["api","db","save the reference only"]],
+  d:["An admin picks one of the approved references (kali, win11-lab) and enters the account.","The backend writes the secret with the writer token, then reads it back with the separate reader token. If that fails, nothing is bound.","Only an allow-listed name is accepted, and one reference belongs to at most one live asset.","The database row holds the path, provider, username and version. Never the password.","The backend refuses to start if the reader and writer tokens are the same."]},
+ use:{cap:"Using: the secret is read inside the backend, handed to the protocol handshake, and wiped. No HTTP endpoint ever returns it.",
+  nodes:[["api","Backend",50,160,160,64,"CredentialService .checkout"],["db","PostgreSQL",370,36,160,64,"the one active reference"],["vault","OpenBao",690,160,160,64,"READER token, verified TLS"],["gw","Gateway",370,290,160,64,"SSH / RDP handshake"]],
+  arrows:[["api","db","6 ordered checks"],["api","vault","read the secret"],["vault","api","username + password",true],["api","gw","handshake, then wipe"]],
+  d:["Checks run in order and any failure refuses: user active with sessions:create, request is the user's own and ACTIVE, asset enabled, grant bound and live, session bound, exactly one active reference.","Only then is OpenBao read. A sealed or unreachable vault means no session, never a fallback.","The secret lives only as long as the handshake and is wiped immediately after (Python cannot guarantee zeroed memory, so lifetimes are kept minimal).","Audit: ATTEMPTED, then RETRIEVED, DENIED or FAILED."]}};
+function wrap(t,n){var out=[],cur="";t.split(" ").forEach(function(w){if((cur+" "+w).trim().length>n&&cur){out.push(cur);cur=w;}else{cur=(cur+" "+w).trim();}});if(cur){out.push(cur);}return out;}
+var sf="store";
+function drawSec(){var svg=$("#sec");svg.innerHTML="";var F=SF[sf];
+  var defs=el("defs",{},svg),mk=el("marker",{id:"sb",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"},defs);el("path",{d:"M0 0L10 5L0 10z",fill:"currentColor"},mk);
+  var pos={};F.nodes.forEach(function(n){pos[n[0]]={x:n[2],y:n[3],w:n[4],h:n[5]};});
+  F.arrows.forEach(function(a,i){var A=pos[a[0]],B=pos[a[1]],ret=a[3];
+    var ax=A.x+A.w/2,ay=A.y+A.h/2,bx=B.x+B.w/2,by=B.y+B.h/2,x1,y1,x2,y2,off=ret?14:-6;
+    if(Math.abs(bx-ax)>Math.abs(by-ay)){var dir=bx>ax?1:-1;x1=ax+dir*A.w/2;x2=bx-dir*B.w/2;y1=ay+(ret?14:-4);y2=by+(ret?14:-4);}
+    else{var d2=by>ay?1:-1;y1=ay+d2*A.h/2;y2=by-d2*B.h/2;x1=ax+(ret?14:-6);x2=bx+(ret?14:-6);}
+    el("line",{x1:x1,y1:y1,x2:x2,y2:y2,"class":"edge"+(ret?" dash":""),"marker-end":"url(#sb)",style:"stroke:var(--accent);stroke-width:1.8"},svg);
+    var mx=(x1+x2)/2,my=(y1+y2)/2;el("text",{x:mx,y:my+(Math.abs(x2-x1)>Math.abs(y2-y1)?(ret?26:-9):4),"text-anchor":Math.abs(x2-x1)>Math.abs(y2-y1)?"middle":"start","font-size":"12.5",dx:Math.abs(x2-x1)>Math.abs(y2-y1)?0:10},svg,a[2]);});
+  F.nodes.forEach(function(n){var g=el("g",{"class":"node"},svg);
+    el("rect",{"class":"box",x:n[2],y:n[3],width:n[4],height:n[5],rx:9},g);
+    el("text",{"class":"t",x:n[2]+n[4]/2,y:n[3]+24,"text-anchor":"middle"},g,n[1]);
+    wrap(n[6],24).forEach(function(w,i){el("text",{"class":"s mono",x:n[2]+n[4]/2,y:n[3]+41+i*12,"text-anchor":"middle"},g,w);});});
+  $("#seccap").textContent=F.cap;
+  var box=$("#secinfo");box.innerHTML="";h("div",{"class":"label"},box,sf==="store"?"What happens":"What is checked");var ul=h("ul",{},box);F.d.forEach(function(x){h("li",{},ul,x);});}
+Array.prototype.forEach.call(document.querySelectorAll("#sflow button"),function(b){b.addEventListener("click",function(){sf=b.getAttribute("data-f");Array.prototype.forEach.call(document.querySelectorAll("#sflow button"),function(x){x.setAttribute("aria-pressed",x===b?"true":"false");});drawSec();});});
+drawSec();
+
+/* ---------- 5. data ---------- */
+var DOM=[["People and access",[["users","Every person; carries the Keycloak subject id (external_id)."],["roles","ADMIN, OPERATOR, APPROVER, AUDITOR."],["permissions","resource:action pairs such as sessions:create."],["user_roles","Which user holds which role."],["role_permissions","Which role grants which permission."]]],
+ ["Requests and approvals",[["access_requests","One row per ask, with the decision, risk and duration."],["approvals","The human decision on a request."],["jit_grants","The time-boxed windows; the single source of 'is this live'."],["policies","Rules attached to assets and applications."],["risk_events","The explained risk score of each request."]]],
+ ["Targets and secrets",[["assets","Servers reached over SSH or RDP."],["applications","Internal web apps for the isolated browser."],["vault_refs","Pointers to OpenBao paths, never the secret."]]],
+ ["Sessions and evidence",[["sessions","Every launched session and its state."],["session_events","The lifecycle of each session."],["recordings","Artifact metadata: path, SHA-256, size, status."],["audit_logs","Who did what, with what result."]]],
+ ["Risk and settings",[["risk_findings","Risk Centre findings with their evidence."],["notifications","Per-user notices."],["app_settings","Admin-editable settings such as the session cap."]]]];
+var FK={access_requests:["applications","assets","policies","users"],app_settings:["users"],applications:["policies","users"],approvals:["access_requests","users"],assets:["policies","users"],audit_logs:["access_requests","sessions","users"],jit_grants:["access_requests","applications","assets","users"],notifications:["users"],policies:["users"],recordings:["sessions"],risk_events:["access_requests","users"],risk_findings:["applications","assets","sessions","users"],session_events:["sessions"],sessions:["access_requests","applications","assets","jit_grants","recordings","users"],vault_refs:["applications","assets"],user_roles:["users","roles"],role_permissions:["roles","permissions"]};
+var tblEls={},tblInfo={};
+(function(){var d=$("#domains");DOM.forEach(function(dm){var c=h("div",{"class":"domain"},d);h("h3",{},c,dm[0]);dm[1].forEach(function(t){tblInfo[t[0]]=t[1];var b=h("button",{"class":"tbl","data-t":t[0]},c,t[0]);tblEls[t[0]]=b;b.addEventListener("click",function(){tpick(t[0]);});});});})();
+function nbrs(t){var s=(FK[t]||[]).slice();Object.keys(FK).forEach(function(k){if(FK[k].indexOf(t)>=0&&s.indexOf(k)<0){s.push(k);}});return s;}
+function tpick(t){var nb=nbrs(t);Object.keys(tblEls).forEach(function(k){var e=tblEls[k];e.classList.toggle("sel",k===t);e.classList.toggle("nb",nb.indexOf(k)>=0);e.classList.toggle("dimmed",k!==t&&nb.indexOf(k)<0);});
+  var box=$("#datainfo");box.innerHTML="";h("div",{"class":"label"},box,"Table");h("h3",{"class":"mono"},box,t);h("p",{},box,tblInfo[t]);
+  var out=FK[t]||[],inn=Object.keys(FK).filter(function(k){return FK[k].indexOf(t)>=0;});
+  if(out.length){h("div",{"class":"label"},box,"References (foreign keys out)");var r=h("div",{"class":"rel"},box);out.forEach(function(k){var b=h("button",{},r,k);b.addEventListener("click",function(){tpick(k);});});}
+  if(inn.length){h("div",{"class":"label"},box,"Referenced by");var r2=h("div",{"class":"rel"},box);inn.forEach(function(k){var b=h("button",{},r2,k);b.addEventListener("click",function(){tpick(k);});});}
+  if(t==="vault_refs"){h("p",{style:"color:var(--muted);font-size:13px"},box,"A soft-deleted asset used to keep its active reference and block it for others; that is fixed on backend 8001.");}}
+tpick("sessions");
+
+/* ---------- 6. status matrix ---------- */
+var ROWS=[
+ ["Lifecycle audit for SSH, RDP and browser sessions","live","Created, started, closed, terminated, failed, expired, with reasons."],
+ ["SSH recording and command transcript","live","asciicast with SHA-256, plus a best-effort transcript."],
+ ["RDP screen recording on durable storage","live","Folder shared between guacd and the backend; verified end to end. Earlier recordings were lost."],
+ ["Hash-verified playback","live","Every playback re-checks the stored SHA-256 and refuses a mismatch."],
+ ["Credentials in OpenBao (staging)","live","Raft, TLS, 2-of-3 unseal, separate reader and writer identities."],
+ ["Pinned SSH host keys, fail-closed","live","Kali's ED25519 key was verified on the console first."],
+ ["Keycloak login with one-time code","live","On the 3002 / 8002 pair."],
+ ["RDP clipboard / file transfer default-deny","pend","Gateway clipboard gate and count-only audit; parameter names verified against guacd."],
+ ["RDP session number as client name","pend","For correlating Windows logon events; whether Windows records it is unverified."],
+ ["Browser upload block","pend","One line in the Chromium policy; needs a container rebuild."],
+ ["Real isolation-daemon health probe","pend","Bounded, leaks nothing; tested against the real daemon."],
+ ["Isolated-browser recording","absent","Sessions that require recording are refused."],
+ ["Browser activity / URL log","absent","Only violations are audited."],
+ ["Reverse-proxy web mode (STANDARD_PROXY)","absent","Only ISOLATED_BROWSER applications launch."],
+ ["RDP command transcript, Windows 4688 / 4104 / Sysmon","absent","A screen recording does not prove which commands ran."],
+ ["require_mfa re-check at credential checkout","absent","Recorded on the request, not re-verified."],
+ ["Standalone policy-engine package","absent","Exists in the repository; the backend does not import it."],
+ ["Backend 8002 uses the in-memory dev vault","risk","Lost on reboot; moving it to staging is an open decision."],
+ ["Keycloak failed-code import and SIEM export","risk","Implemented but switched off on the running backends."],
+ ["RDP host certificate not validated","risk","RDP_IGNORE_CERT=true, a lab setting."],
+ ["63 of 68 recording rows point at lost files","risk","Lost before the 15 Oct backup; no copy exists."],
+ ["Backups are on this Mac only; OpenBao snapshot never restore-tested","risk","Copy the backup to encrypted storage and test the restore on port 18220."]];
+var FILT=[["all","All"],["live","Live"],["pend","Waiting"],["absent","Missing"],["risk","Open risks"]],fcur="all";
+function drawMatrix(){var tb=$("#matrix tbody");tb.innerHTML="";ROWS.forEach(function(r){if(fcur!=="all"&&r[1]!==fcur){return;}
+  var st=r[1]==="risk"?'<span class="chip neutral" style="color:var(--absent);background:var(--absent-soft)">Open risk</span>':chip(r[1]);h("tr",{},tb,"<td><b>"+r[0]+"</b></td><td>"+st+"</td><td style='color:var(--muted)'>"+r[2]+"</td>");});}
+(function(){var f=$("#filters");FILT.forEach(function(x){var n=ROWS.filter(function(r){return x[0]==="all"||r[1]===x[0];}).length;var b=h("button",{"aria-pressed":x[0]===fcur?"true":"false","data-f":x[0]},f,x[1]+" · "+n);b.addEventListener("click",function(){fcur=x[0];Array.prototype.forEach.call(f.children,function(c){c.setAttribute("aria-pressed",c===b?"true":"false");});drawMatrix();});});})();
+drawMatrix();
+
+show(location.hash.slice(1)||"overview");
+})();
+</script>
+
+</body></html>

@@ -36,6 +36,7 @@ from app.database.session import async_session_factory
 from app.models.access_request import AccessRequest
 from app.models.asset import Asset
 from app.models.jit_grant import JITGrant
+from app.models.policy import Policy
 from app.models.recording import Recording
 from app.models.session import Session, SessionEvent
 from app.models.user import User
@@ -43,6 +44,7 @@ from app.services.credential_errors import failure_message
 from app.services.credential_service import CheckoutRequest, CredentialAccessDenied, CredentialService, CredentialUnavailable
 from app.services.guacamole import GuacamoleError, InstructionParser, connect_guacd, encode, handshake
 from app.services.jit_service import JITService
+from app.services.rdp_controls import ClipboardGate, audit_summary, channel_params, client_name, resolve_controls
 from app.services.rdp_gateway import GuacdRdpGateway, LiveRDPConnection, get_rdp_gateway, rdp_recording_writable
 from app.services.rdp_recording import RECORDING_NAME, finalize_rdp_recording, wait_for_recording_file
 from app.services.ssh_ticket import SSHTicketInvalidError, SSHTicketService, SSHTicketStorageError, get_ssh_ticket_service
@@ -190,6 +192,7 @@ async def rdp_websocket(
         ids = dict(user_id=user.id, asset_id=asset.id, request_id=access_request.id, grant_id=grant.id)
         session_number, recording_id = session.session_number, session.recording_id
         target_host, target_port = (asset.ip_address or asset.hostname), asset.port
+        controls = resolve_controls(await db.get(Policy, asset.policy_id) if asset.policy_id else None)
         checkout = CheckoutRequest(
             user_id=user.id, access_request_id=access_request.id, jit_grant_id=grant.id, asset_id=asset.id,
             session_id=session.id, source_ip=websocket.client.host if websocket.client else None)
@@ -200,6 +203,7 @@ async def rdp_websocket(
                     "hostname": target_host, "port": str(target_port), "username": account, "password": credential.reveal(),
                     "domain": domain, "security": settings.RDP_SECURITY, "ignore-cert": "true" if settings.RDP_IGNORE_CERT else "false",
                     "resize-method": "display-update", "disable-audio": "true", "timezone": "UTC",
+                    **channel_params(controls), "client-name": client_name(session_number),
                 }
         except (CredentialAccessDenied, CredentialUnavailable) as exc:
             await _close_session_in_db(session_id, status_val="FAILED", reason=exc.reason)
@@ -234,6 +238,7 @@ async def rdp_websocket(
 
     live = LiveRDPConnection(session_id=session_id, stream=stream, guacd_connection_id=guac_id)
     gateway.register(live)
+    gate = ClipboardGate(controls.clipboard)
     final_status, final_reason = "COMPLETED", "SESSION_TERMINATED"
     activated = False
     recording_failure: Optional[str] = None
@@ -304,7 +309,8 @@ async def rdp_websocket(
                 db, actor=actor, action="SESSION_STARTED", target_type="asset", target_id=str(ids["asset_id"]),
                 request_id=ids["request_id"], session_id=session_id,
                 source_ip=websocket.client.host if websocket.client else None, result="SUCCESS", severity="INFO",
-                metadata={"protocol": "RDP", "session_number": session_number, "recording": recording_id is not None})
+                metadata={"protocol": "RDP", "session_number": session_number, "recording": recording_id is not None,
+                          "controls": audit_summary(controls)})
             await db.commit()
         for chunk in held:
             await websocket.send_text(chunk)
@@ -315,6 +321,8 @@ async def rdp_websocket(
             try:
                 while True:
                     text, instructions = await stream.read_chunk()
+                    for ins in instructions:
+                        gate.server_instruction(ins)
                     await websocket.send_text(text)
                     if any(i and i[0] in ("disconnect", "error") for i in instructions):
                         final_reason = "REMOTE_DISCONNECTED"  # e.g. Windows signed the session out
@@ -336,7 +344,7 @@ async def rdp_websocket(
                     if len(text) > MAX_CLIENT_FRAME:
                         continue
                     for ins in parser.feed(text):
-                        if ins and ins[0] in CLIENT_OPCODES:
+                        if ins and ins[0] in CLIENT_OPCODES and gate.client_instruction(ins):
                             stream.send(*ins)
                     await stream.writer.drain()
             except WebSocketDisconnect:
@@ -393,6 +401,18 @@ async def rdp_websocket(
                 except Exception as exc:
                     logger.error("rdp recording finalize failed session=%s %s", session_id, type(exc).__name__)
             await _close_session_in_db(session_id, status_val=final_status, reason=final_reason)
+            clip = gate.summary()
+            if clip is not None:
+                try:
+                    async with async_session_factory() as db:
+                        await write_audit_log(
+                            db, actor=await db.get(User, ids["user_id"]), action="RDP_CLIPBOARD_ACTIVITY",
+                            target_type="session", target_id=str(session_id), request_id=ids["request_id"],
+                            session_id=session_id, result="SUCCESS", severity="INFO" if gate.allowed else "MEDIUM",
+                            metadata={"protocol": "RDP", **clip})
+                        await db.commit()
+                except Exception as exc:
+                    logger.error("rdp clipboard audit failed session=%s %s", session_id, type(exc).__name__)
             if activated:
                 # How the connected session ended, unless an administrator/owner termination (which audits
                 # itself as SESSION_TERMINATED) owns that record.

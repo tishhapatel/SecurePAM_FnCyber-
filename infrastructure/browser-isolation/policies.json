@@ -1,6 +1,7 @@
 {
   "SSLErrorOverrideAllowed": false,
   "DownloadRestrictions": 3,
+  "AllowFileSelectionDialogs": false,
   "PrintingEnabled": false,
   "DeveloperToolsAvailability": 2,
   "BrowserSignin": 0,

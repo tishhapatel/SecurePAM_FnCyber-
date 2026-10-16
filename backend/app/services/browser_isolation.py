@@ -57,6 +57,75 @@ def _token() -> str:
         raise IsolationError("ISOLATION_NOT_CONFIGURED") from exc
 
 
+@dataclass(frozen=True)
+class IsolationProbe:
+    status: str                 # healthy | degraded | unhealthy | not_configured
+    details: str
+    latency_ms: Optional[float] = None
+
+
+_PROBE_SLOW_SECONDS = 1.0       # reachable but slow: launches would be sluggish -> degraded
+_PROBE_HTTP_TIMEOUT = httpx.Timeout(1.5, connect=1.0)
+_PROBE_TOTAL_BUDGET = 4.0       # hard ceiling for the whole probe: a health check must never hang
+_NO_SUCH_SESSION = "00000000-0000-0000-0000-000000000000"
+
+
+async def probe_isolation_daemon() -> IsolationProbe:
+    """Real, bounded probe of the isolation daemon. Returns generic text only: no token, path, URL or
+    exception detail is placed in the result (health responses are readable by operators and logs).
+
+    1. Disabled by configuration -> not_configured (nothing to probe).
+    2. Gateway token unreadable/empty -> unhealthy: a launch cannot authenticate.
+    3. GET /health (unauthenticated) unreachable / not ok -> unhealthy.
+    4. GET /sessions/<unused id> with the bearer token: 404 means the token is accepted (read-only, nothing is
+       created); 401 -> unhealthy (launches would be rejected); anything else -> degraded.
+    5. Slow answers -> degraded. Otherwise healthy.
+    """
+    if not settings.BROWSER_ISOLATION_ENABLED:
+        return IsolationProbe("not_configured", "Isolated browsing is disabled (BROWSER_ISOLATION_ENABLED=false)")
+    try:
+        token = _token()
+    except IsolationError:
+        return IsolationProbe("unhealthy", "Isolation gateway token is not configured or not readable")
+    if not token:
+        return IsolationProbe("unhealthy", "Isolation gateway token file is empty")
+
+    started = time.monotonic()
+
+    async def run() -> IsolationProbe:
+        async with httpx.AsyncClient(base_url=settings.BROWSER_ISOLATION_URL, timeout=_PROBE_HTTP_TIMEOUT,
+                                     trust_env=False, follow_redirects=False) as client:
+            health = await client.get("/health")
+            elapsed = round((time.monotonic() - started) * 1000, 1)
+            if health.status_code != 200:
+                return IsolationProbe("unhealthy", f"Isolation daemon health returned HTTP {health.status_code}", elapsed)
+            try:
+                body = health.json()
+            except ValueError:
+                body = {}
+            if body.get("ok") is not True:
+                return IsolationProbe("unhealthy", "Isolation daemon reports it is not ready", elapsed)
+            sessions = body.get("sessions")
+            active = f"{sessions} active browser session(s)" if isinstance(sessions, int) and sessions >= 0 else "session count unavailable"
+            auth = await client.get(f"/sessions/{_NO_SUCH_SESSION}", headers={"Authorization": f"Bearer {token}"})
+            elapsed = round((time.monotonic() - started) * 1000, 1)
+            if auth.status_code == 401:
+                return IsolationProbe("unhealthy", "Isolation daemon rejects the gateway token; launches would fail", elapsed)
+            if auth.status_code != 404:
+                return IsolationProbe("degraded", f"Isolation daemon answered an authenticated probe with HTTP {auth.status_code}", elapsed)
+            note = "; sessions that require recording are refused (recording is not implemented)"
+            if elapsed / 1000 > _PROBE_SLOW_SECONDS:
+                return IsolationProbe("degraded", f"Isolation daemon reachable and authenticated but slow ({elapsed:.0f} ms); {active}" + note, elapsed)
+            return IsolationProbe("healthy", f"Isolation daemon reachable and accepts the gateway token; {active}" + note, elapsed)
+
+    try:
+        return await asyncio.wait_for(run(), _PROBE_TOTAL_BUDGET)
+    except asyncio.TimeoutError:
+        return IsolationProbe("unhealthy", "Isolation daemon did not answer in time")
+    except httpx.HTTPError:
+        return IsolationProbe("unhealthy", "Isolation daemon is unreachable")
+
+
 class BrowserIsolationGateway:
     is_deployed = True
 
