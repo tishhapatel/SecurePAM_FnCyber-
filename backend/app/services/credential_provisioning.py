@@ -25,6 +25,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.asset import Asset
 from app.models.vault_ref import VaultRef
 from app.secret_providers import (
     SecretAccessDeniedError,
@@ -65,9 +66,11 @@ def allowed_secret_names() -> list[str]:
 async def bound_assets(db: AsyncSession) -> dict[str, UUID]:
     """secret name -> asset currently holding the active binding."""
     prefix = f"{settings.OPENBAO_SECRET_PATH_PREFIX}/assets/"
+    # A binding still held by a soft-deleted asset must not keep the reference "taken".
     rows = (await db.execute(
-        select(VaultRef.vault_path, VaultRef.asset_id).where(VaultRef.is_active == True,  # noqa: E712
-                                                             VaultRef.asset_id.is_not(None))
+        select(VaultRef.vault_path, VaultRef.asset_id)
+        .join(Asset, Asset.id == VaultRef.asset_id)
+        .where(VaultRef.is_active == True, Asset.is_deleted == False)  # noqa: E712
     )).all()
     return {path[len(prefix):]: asset_id for path, asset_id in rows if path.startswith(prefix)}
 

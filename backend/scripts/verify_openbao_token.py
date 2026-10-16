@@ -214,7 +214,8 @@ def main() -> int:
     if not paths:
         print("FAIL policy file - it declares no registered paths")
         return 2
-    with httpx.Client(base_url=addr, timeout=8.0, trust_env=False) as client:
+    with httpx.Client(base_url=addr, timeout=8.0, trust_env=False,
+                      verify=os.environ.get("OPENBAO_CA_CERT") or True) as client:
         checks = verify(client, admin_token, app_token, paths, os.environ.get("OPENBAO_MOUNT_POINT", "secret"))
     for check in checks:
         print(check.line())

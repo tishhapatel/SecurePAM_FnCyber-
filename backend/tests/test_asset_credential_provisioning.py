@@ -168,6 +168,22 @@ async def test_rotate_existing_asset_credential_and_retry_path(client, db_sessio
     assert PASSWORD not in r.text
 
 
+async def test_reference_held_by_a_deleted_asset_is_free_again_and_not_shared_between_live_assets(
+        client, db_session, admin_token, openbao):
+    h = auth_header(admin_token)
+    old = (await client.post(CREATE, headers=h, json={"asset": asset_body(), "credential": cred()})).json()["asset"]["id"]
+    assert (await client.delete(f"/api/v1/assets/{old}", headers=h)).status_code == 204
+    status = (await client.get(STATUS, headers=h)).json()["references"]
+    assert {r["name"]: r["bound_asset_id"] for r in status}["kali"] is None      # ghost binding ignored
+    # the reference can be bound to a new live asset ...
+    new = await client.post(CREATE, headers=h, json={"asset": asset_body(name="Other", ip="10.10.0.6"), "credential": cred()})
+    assert new.status_code == 201
+    # ... and a different live asset still cannot take it, nor the other asset's reference
+    third = await client.post(CREATE, headers=h, json={"asset": asset_body(name="Third", ip="10.10.0.7"), "credential": cred()})
+    assert third.status_code == 409 and third.json()["error_code"] == "SECRET_ALREADY_BOUND"
+    assert PASSWORD not in third.text
+
+
 @pytest.mark.parametrize("token_fixture", ["operator_token", "approver_token", "auditor_token"])
 async def test_non_admins_cannot_provision_or_see_status(client, db_session, request, token_fixture, openbao):
     h = auth_header(request.getfixturevalue(token_fixture))

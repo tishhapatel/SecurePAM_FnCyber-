@@ -1,0 +1,228 @@
+<mxfile host="app.diagrams.net" agent="ChatGPT">
+  <diagram id="securepam-architecture-pro" name="SecurePAM Architecture">
+    <mxGraphModel dx="2377" dy="1312" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#17365D;strokeColor=#17365D;fontColor=#FFFFFF;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" value="SecurePAM — Detailed Architecture" vertex="1">
+          <mxGeometry height="52" width="1560" x="20" y="12" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" parent="1" style="text;html=1;strokeColor=none;fillColor=none;fontColor=#29445F;fontSize=14;fontStyle=1;align=center;verticalAlign=middle;" value="Risk-Adaptive Privileged Access Management Platform" vertex="1">
+          <mxGeometry height="25" width="1560" x="20" y="66" as="geometry" />
+        </mxCell>
+        <mxCell id="users" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1ECFF;strokeColor=#8064A2;fontColor=#4B367C;fontSize=13;fontStyle=1;align=center;verticalAlign=middle;" value="&lt;b&gt;USERS&lt;/b&gt;&lt;br&gt;&lt;br&gt;Privileged IT admins&lt;br&gt;&lt;br&gt;Operators&lt;br&gt;&lt;br&gt;Approvers&amp;nbsp;&lt;br&gt;&lt;br&gt;Auditors" vertex="1">
+          <mxGeometry height="270" width="145" x="20" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="idp_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1ECFF;strokeColor=#8064A2;strokeWidth=2;fontColor=#4B367C;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="IDENTITY LAYER" vertex="1">
+          <mxGeometry height="270" width="245" x="190" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="idp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B6A5D1;strokeWidth=1.2;fontColor=#33264C;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;font style=&quot;font-size: 13px;&quot;&gt;&lt;b&gt;KEYCLOAK&lt;/b&gt;&lt;br&gt;&lt;br&gt;Authentication&lt;br&gt;MFA (TOTP / authenticator)&lt;br&gt;User management&lt;br&gt;Groups and roles&lt;br&gt;Token issuance&lt;/font&gt;" vertex="1">
+          <mxGeometry height="190" width="211" x="207" y="153" as="geometry" />
+        </mxCell>
+        <mxCell id="front_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF2FF;strokeColor=#477DB8;strokeWidth=2;fontColor=#204A79;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="PRESENTATION LAYER" vertex="1">
+          <mxGeometry height="270" width="265" x="465" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="front" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A7C1E4;strokeWidth=1.2;fontColor=#1F3855;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;font style=&quot;font-size: 13px;&quot;&gt;&lt;b&gt;React + TypeScript +&amp;nbsp;Tailwind CSS&lt;/b&gt;&lt;br&gt;&lt;br&gt;Dashboard&lt;br&gt;Request access&lt;br&gt;Asset / application management&lt;br&gt;Approvals, sessions and reports&lt;/font&gt;" vertex="1">
+          <mxGeometry height="190" width="231" x="482" y="153" as="geometry" />
+        </mxCell>
+        <mxCell id="control_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF2FF;strokeColor=#477DB8;strokeWidth=2;fontColor=#204A79;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="&amp;nbsp;CONTROL PLANE" vertex="1">
+          <mxGeometry height="370" width="300" x="760" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="backend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A7C1E4;strokeWidth=1.2;fontColor=#1F3855;fontSize=13;align=center;verticalAlign=top;spacing=8;" value="&lt;div&gt;&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;b&gt;PAM Backend&lt;/b&gt;&lt;br&gt;FastAPI / Python (reference architecture)&lt;br&gt;&lt;br&gt;OIDC token validation&lt;br&gt;RBAC and authorization&lt;br&gt;Policy engine&lt;div&gt;Risk engine&lt;br&gt;Approval workflow&lt;br&gt;JIT access management&lt;br&gt;Session orchestration&lt;br&gt;Audit logging and APIs&lt;/div&gt;" vertex="1">
+          <mxGeometry height="260" width="250" x="780" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="features" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7F9FC;strokeColor=#B8C5D3;fontColor=#24394E;fontSize=13.5;align=left;verticalAlign=top;spacing=8;" value="&lt;div&gt;&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;b&gt;SECURITY CAPABILITIES&lt;/b&gt;&lt;br&gt;&lt;br&gt;• SSO and MFA&lt;br&gt;• RBAC and group management&lt;br&gt;• Time-bound JIT access&lt;br&gt;• Approval workflow&lt;br&gt;• Credential vault / injection&lt;br&gt;• RDP, SSH and HTTPS gateways&lt;br&gt;• Session evidence and audit&lt;br&gt;• Risk-adaptive controls&lt;br&gt;• SIEM integration" vertex="1">
+          <mxGeometry height="270" width="220" x="1362" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="data_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F3F7;strokeColor=#77879A;strokeWidth=2;fontColor=#35485D;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="DATA SERVICES" vertex="1">
+          <mxGeometry height="270" width="220" x="1120" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="postgres" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B8C2CD;strokeWidth=1.2;fontColor=#293B4E;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;font style=&quot;font-size: 13px;&quot;&gt;&lt;b&gt;PostgreSQL&lt;/b&gt;&lt;br&gt;Users, assets, policies&lt;br&gt;Requests, sessions&lt;br&gt;Audit metadata etc&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="186" x="1137" y="153" as="geometry" />
+        </mxCell>
+        <mxCell id="redis" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B8C2CD;strokeWidth=1.2;fontColor=#293B4E;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;b&gt;Redis&lt;/b&gt;&lt;br&gt;Cache, queues&lt;br&gt;Temporary session state" vertex="1">
+          <mxGeometry height="90" width="186" x="1137" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="plane_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E7F6F5;strokeColor=#348B87;strokeWidth=2;fontColor=#155E5B;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="SESSION GATEWAYS (DATA PLANE)" vertex="1">
+          <mxGeometry height="245" width="940" x="100" y="585" as="geometry" />
+        </mxCell>
+        <mxCell id="rdp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B7C5D4;strokeWidth=1.2;fontColor=#203448;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;div style=&quot;&quot;&gt;&lt;b style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;RDP GATEWAY&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;&quot;&gt;&lt;b style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;(windows)&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;Apache Guacamole + guacd&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;div style=&quot;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;Browser-based RDP access&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;Session recording&amp;nbsp;&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;Credential injection from vault&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;Session control and timeout&lt;/span&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="155" width="275" x="120" y="630" as="geometry" />
+        </mxCell>
+        <mxCell id="ssh" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B7C5D4;strokeWidth=1.2;fontColor=#203448;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;b&gt;SSH GATEWAY&lt;/b&gt;&lt;div&gt;&lt;b&gt;(Linux/Unix)&lt;br&gt;&lt;/b&gt;Apache Guacamole + guacd&lt;br&gt;&lt;br&gt;Browser based SSH terminal&lt;br&gt;Terminal session recording&amp;nbsp;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(32, 52, 72), rgb(179, 197, 214));&quot;&gt;Command logging&lt;/span&gt;&lt;/div&gt;&lt;div&gt;Credential injection from vault&amp;nbsp;&lt;/div&gt;&lt;div&gt;Session timeout&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="155" width="275" x="428" y="630" as="geometry" />
+        </mxCell>
+        <mxCell id="web" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B7C5D4;strokeWidth=1.2;fontColor=#203448;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;b&gt;WEB GATEWAY&lt;/b&gt;&lt;div&gt;&lt;b&gt;(HTTP/HTTPS)&lt;br&gt;&lt;/b&gt;NGINX reverse proxy&lt;br&gt;&lt;br&gt;Registered / allowlisted applications&lt;br&gt;HTTP(S) audit&lt;br&gt;High-risk option: isolated Chromium + Xvfb/noVNC + recording&lt;/div&gt;" vertex="1">
+          <mxGeometry height="155" width="290" x="720" y="630" as="geometry" />
+        </mxCell>
+        <mxCell id="vault_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF4DF;strokeColor=#C18A2E;strokeWidth=2;fontColor=#805514;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="SECRET MANAGEMENT" vertex="1">
+          <mxGeometry height="200" width="220" x="1120" y="405" as="geometry" />
+        </mxCell>
+        <mxCell id="vault" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DCC18B;strokeWidth=1.2;fontColor=#5C4218;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;font style=&quot;font-size: 13px;&quot;&gt;&lt;b&gt;OpenBao / HashiCorp Vault&lt;/b&gt;&lt;br&gt;&lt;br&gt;Encrypted credentials&lt;br&gt;Controlled retrieval&lt;br&gt;Credential injection (RDP/SSH)&lt;br&gt;Optional password rotation&lt;/font&gt;" vertex="1">
+          <mxGeometry height="125" width="186" x="1137" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="monitor_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF4DF;strokeColor=#C18A2E;strokeWidth=2;fontColor=#805514;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="MONITORING &amp;amp; SIEM" vertex="1">
+          <mxGeometry height="315" width="220" x="1360" y="405" as="geometry" />
+        </mxCell>
+        <mxCell id="monitor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DCC18B;strokeWidth=1.2;fontColor=#5C4218;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;font style=&quot;font-size: 13px;&quot;&gt;&lt;b&gt;Wazuh&lt;/b&gt;&lt;br&gt;Security events and alerts&lt;br&gt;&lt;br&gt;&lt;b&gt;Prometheus&lt;/b&gt;&lt;br&gt;Health / service metrics&lt;br&gt;&lt;br&gt;&lt;b&gt;Grafana&lt;/b&gt;&lt;br&gt;Monitoring dashboards&lt;br&gt;&lt;br&gt;Security events and audit records feed investigations.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="245" width="186" x="1377" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="target_layer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF6EC;strokeColor=#4F9465;strokeWidth=2;fontColor=#245A35;fontSize=15;fontStyle=1;verticalAlign=top;spacingTop=10;" value="TARGET ASSETS / INTERNAL LAB" vertex="1">
+          <mxGeometry height="145" width="1080" x="20" y="860" as="geometry" />
+        </mxCell>
+        <mxCell id="win" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A9CDB1;strokeWidth=1.2;fontColor=#24452C;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;b&gt;WINDOWS SERVERS&lt;/b&gt;&lt;br&gt;RDP / TCP 3389&lt;br&gt;Gateway-only access&lt;div&gt;(no direct access)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="90" width="325" x="38" y="900" as="geometry" />
+        </mxCell>
+        <mxCell id="linux" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A9CDB1;strokeWidth=1.2;fontColor=#24452C;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;b&gt;LINUX / UNIX SERVERS&lt;/b&gt;&lt;br&gt;Ubuntu / CentOS / Kali&lt;br&gt;&lt;div&gt;SSH( 22)&lt;br&gt;Gateway-only access (no direct access)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="90" width="325" x="379" y="900" as="geometry" />
+        </mxCell>
+        <mxCell id="apps" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A9CDB1;strokeWidth=1.2;fontColor=#24452C;fontSize=12;align=center;verticalAlign=top;spacing=8;" value="&lt;b&gt;INTERNAL WEB APPLICATIONS&lt;/b&gt;&lt;br&gt;HTTP / HTTPS · registered targets only&lt;div&gt;Access via PAM Reverse Proxy or Isolated Browser&lt;/div&gt;&lt;div&gt;Application-based policies&lt;/div&gt;" vertex="1">
+          <mxGeometry height="90" width="360" x="720" y="900" as="geometry" />
+        </mxCell>
+        <mxCell id="network" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9E8;strokeColor=#D8B65A;fontColor=#604A13;fontSize=11;align=center;verticalAlign=middle;spacing=8;flipV=0;legacyAnchorPoints=0;flipH=0;container=0;" value="&lt;b&gt;NETWORK ARCHITECTURE&lt;/b&gt;&lt;div&gt;&lt;b&gt;&lt;br&gt;&lt;/b&gt;Users → PAM access zone / server → firewall / segmentation → target network.&amp;nbsp;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="150" width="460" x="1127" y="810" as="geometry" />
+        </mxCell>
+        <mxCell id="flowtitle" parent="1" style="text;html=1;strokeColor=none;fillColor=none;fontColor=#29445F;fontSize=14;fontStyle=1;align=center;verticalAlign=middle;" value="END-TO-END ACCESS FLOW" vertex="1">
+          <mxGeometry height="25" width="1560" x="20" y="1005" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8EA4BB;strokeWidth=1.2;fontColor=#203B56;fontSize=11;align=left;verticalAlign=middle;spacing=7;" value="1 · LOGIN&lt;br&gt;Keycloak + MFA; validate token" vertex="1">
+          <mxGeometry height="70" width="215" x="20" y="1037" as="geometry" />
+        </mxCell>
+        <mxCell id="f2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8EA4BB;strokeWidth=1.2;fontColor=#203B56;fontSize=11;align=left;verticalAlign=middle;spacing=7;" value="2 · REQUEST ACCESS&lt;br&gt;Target, protocol, duration, reason" vertex="1">
+          <mxGeometry height="70" width="215" x="243" y="1037" as="geometry" />
+        </mxCell>
+        <mxCell id="f3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8EA4BB;strokeWidth=1.2;fontColor=#203B56;fontSize=11;align=left;verticalAlign=middle;spacing=7;" value="3 · DECIDE&lt;br&gt;Risk, policy and approval" vertex="1">
+          <mxGeometry height="70" width="215" x="466" y="1037" as="geometry" />
+        </mxCell>
+        <mxCell id="f4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8EA4BB;strokeWidth=1.2;fontColor=#203B56;fontSize=11;align=left;verticalAlign=middle;spacing=7;" value="4 · CREDENTIAL RETRIEVAL&lt;br&gt;PAM retrieve credential from vault + injection into gateway" vertex="1">
+          <mxGeometry height="70" width="215" x="689" y="1037" as="geometry" />
+        </mxCell>
+        <mxCell id="f5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8EA4BB;strokeWidth=1.2;fontColor=#203B56;fontSize=11;align=left;verticalAlign=middle;spacing=7;" value="5 · SESSION ACCESS&lt;br&gt;RDP / SSH / Web session starts; Screen / terminal recording begins." vertex="1">
+          <mxGeometry height="70" width="215" x="912" y="1037" as="geometry" />
+        </mxCell>
+        <mxCell id="f6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8EA4BB;strokeWidth=1.2;fontColor=#203B56;fontSize=11;align=left;verticalAlign=middle;spacing=7;" value="6 · MONITORING AND AUDIT&lt;br&gt;All actions logged (who, what, when) ; Recording stored; session evidence sent to SIEM" vertex="1">
+          <mxGeometry height="70" width="215" x="1135" y="1037" as="geometry" />
+        </mxCell>
+        <mxCell id="f7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8EA4BB;strokeWidth=1.2;fontColor=#203B56;fontSize=11;align=left;verticalAlign=middle;spacing=7;" value="7 · END&lt;br&gt;Terminate session ( timeout / manual); temporary access revoked; Recording and audit available for review" vertex="1">
+          <mxGeometry height="70" width="215" x="1358" y="1037" as="geometry" />
+        </mxCell>
+        <mxCell id="user_idp" edge="1" parent="1" source="users" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="idp" value="Login">
+          <mxGeometry relative="1" x="-0.2" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="175" y="245" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="idp_front" edge="1" parent="1" source="idp" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="front" value="OIDC / JWT">
+          <mxGeometry relative="1" x="0.0149" as="geometry">
+            <Array as="points">
+              <mxPoint x="450" y="270" />
+              <mxPoint x="450" y="248" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="front_back" edge="1" parent="1" source="front" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;startArrow=block;startFill=1;" target="backend" value="API">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="745" y="245" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="back_db" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="postgres" value="DB">
+          <mxGeometry relative="1" x="0.1589" as="geometry">
+            <Array as="points">
+              <mxPoint x="1120" y="215" />
+              <mxPoint x="1120" y="215" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="back_redis" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="redis" value="Cache">
+          <mxGeometry relative="1" x="0.3084" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1110" y="305" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="back_rdp" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="rdp" value="">
+          <mxGeometry relative="1" x="0.1556" as="geometry">
+            <Array as="points">
+              <mxPoint x="830" y="520" />
+              <mxPoint x="230" y="520" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="back_ssh" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="ssh" value="">
+          <mxGeometry relative="1" x="0.1412" as="geometry">
+            <Array as="points">
+              <mxPoint x="830" y="550" />
+              <mxPoint x="680" y="550" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="back_web" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;startArrow=block;startFill=1;" target="web" value="Authorized session">
+          <mxGeometry relative="1" x="-0.2381" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="830" y="530" />
+              <mxPoint x="830" y="530" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rdp_win" edge="1" parent="1" source="rdp" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="win" value="RDP">
+          <mxGeometry relative="1" x="0.4815" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="345" y="810" />
+              <mxPoint x="200" y="810" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ssh_linux" edge="1" parent="1" source="ssh" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="linux" value="SSH">
+          <mxGeometry relative="1" x="0.5882" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="635" y="810" />
+              <mxPoint x="420" y="810" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="web_apps" edge="1" parent="1" source="web" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="apps" value="HTTPS">
+          <mxGeometry relative="1" x="0.0968" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="930" y="810" />
+              <mxPoint x="900" y="810" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="vault_backend" edge="1" parent="1" source="vault" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;startArrow=block;startFill=1;" target="backend" value="Secret retrieval">
+          <mxGeometry relative="1" x="0.0493" as="geometry">
+            <Array as="points">
+              <mxPoint x="1110" y="530" />
+              <mxPoint x="1110" y="322.5" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="backend_monitor" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#526A85;strokeWidth=2;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="monitor" value="Security events">
+          <mxGeometry relative="1" x="-0.0127" as="geometry">
+            <Array as="points">
+              <mxPoint x="1080" y="290" />
+              <mxPoint x="1080" y="650" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="db_monitor" edge="1" parent="1" source="postgres" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#526A86;strokeWidth=1.5;endArrow=block;endFill=1;labelBackgroundColor=#FFFFFF;" target="monitor" value="Audit metadata">
+          <mxGeometry relative="1" x="0.1302" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1350" y="200" />
+              <mxPoint x="1350" y="530" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

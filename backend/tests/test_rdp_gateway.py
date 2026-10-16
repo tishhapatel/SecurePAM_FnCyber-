@@ -29,9 +29,12 @@ from tests.test_session_endpoints import (  # noqa: F401  (fixtures and helpers)
 )
 
 CANARY = "RDP-GW-CANARY-not-real"
+CLIP_CANARY = "Q0xJUC1DQU5BUlktbm90LXJlYWw="  # base64 "CLIP-CANARY-not-real": must never reach guacd or the audit log
 ARGS = ["VERSION_1_5_0", "hostname", "port", "username", "password", "domain", "security", "ignore-cert",
         "resize-method", "disable-audio", "recording-path", "recording-name", "create-recording-path",
-        "recording-include-keys", "timezone"]
+        "recording-include-keys", "timezone",
+        "disable-copy", "disable-paste", "enable-drive", "disable-download", "disable-upload",
+        "enable-printing", "enable-sftp", "client-name"]
 
 
 class FakeGuacd:
@@ -232,7 +235,9 @@ async def test_full_session_credentials_stay_server_side_and_recording_is_finali
 
         # Browser input is relayed; anything outside the allowlist (e.g. a second connect) is dropped.
         ws.send_text(encode("mouse", "10", "20", "1", "0") + encode("key", "65", "1") + encode("connect", "x")
-                     + encode("get", "0", "stream"))
+                     + encode("get", "0", "stream")
+                     # A paste into the remote desktop: default deny, so the whole clipboard stream is dropped.
+                     + encode("clipboard", "7", "text/plain") + encode("blob", "7", CLIP_CANARY) + encode("end", "7"))
         await _wait(lambda: asyncio.sleep(0, result="mouse" in fake.received))
 
         gw_conn = gateway.get_live_connection(session.id)
@@ -254,6 +259,13 @@ async def test_full_session_credentials_stay_server_side_and_recording_is_finali
     assert fake.handshake_opcodes[:4] == ["size", "audio", "video", "image"]
     assert "mouse" in fake.received and "key" in fake.received and "disconnect" in fake.received
     assert "connect" not in fake.received and "get" not in fake.received
+    # Default deny: guacd was told so explicitly, and no clipboard stream reached it.
+    assert (p["disable-copy"], p["disable-paste"]) == ("true", "true")
+    assert (p["enable-drive"], p["disable-download"], p["disable-upload"]) == ("false", "true", "true")
+    assert (p["enable-printing"], p["enable-sftp"]) == ("false", "false")
+    assert "clipboard" not in fake.received and "blob" not in fake.received and "end" not in fake.received
+    # Correlation: the SecurePAM session number is the RDP client name Windows is told about.
+    assert p["client-name"] == (await _row(Session, launched["session_id"])).session_number
 
     session = await _row(Session, launched["session_id"])
     assert session.status == "TERMINATED"
@@ -270,7 +282,12 @@ async def test_full_session_credentials_stay_server_side_and_recording_is_finali
         select(__import__("app.models.audit", fromlist=["AuditLog"]).AuditLog))).scalars().all()}
     assert {"SESSION_STARTED", "RECORDING_STARTED", "RECORDING_COMPLETED", "SESSION_TERMINATED", "JIT_REVOKED"} <= actions
     for row in (await db_session.execute(select(__import__("app.models.audit", fromlist=["AuditLog"]).AuditLog))).scalars():
-        assert CANARY not in repr(row.details)
+        assert CANARY not in repr(row.details) and CLIP_CANARY not in repr(row.details)
+    (started,) = await _actions(db_session, "SESSION_STARTED")
+    assert started.details["controls"] == {"clipboard": False, "file_transfer": False}
+    (clip,) = await _actions(db_session, "RDP_CLIPBOARD_ACTIVITY")   # counts only; never the content
+    assert clip.details["clipboard_policy"] == "blocked" and clip.details["browser_to_remote_transfers"] == 1
+    assert clip.details["blocked_at_gateway"] == 1 and clip.details["content_captured"] is False
 
 
 async def test_recording_must_exist_before_any_frame_is_shown(db_session, operator_token, provider, guacd, monkeypatch):

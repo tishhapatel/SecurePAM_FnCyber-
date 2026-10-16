@@ -284,9 +284,17 @@ async def _check_gateways(db: AsyncSession) -> List[ServiceHealth]:
     return [
         await _check_ssh_gateway(db),
         await _check_rdp_gateway(),
-        ServiceHealth(service="gateway_web", status="not_configured",
-                      details="Web gateway (NGINX/browser isolation) is not deployed"),
+        await _check_web_gateway(),
     ]
+
+
+async def _check_web_gateway() -> ServiceHealth:
+    """Isolated-browser gateway: a real, bounded probe of the isolation daemon (see probe_isolation_daemon)."""
+    from app.services.browser_isolation import probe_isolation_daemon
+
+    result = await probe_isolation_daemon()
+    return ServiceHealth(service="gateway_web", status=result.status, latency_ms=result.latency_ms,
+                         details=result.details)
 
 
 def _check_recording_storage() -> ServiceHealth:
